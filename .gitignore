@@ -1,0 +1,9 @@
+# local Claude Code settings (prototype hook wiring)
+.claude/settings.local.json
+# prototype runtime state
+prototype/bus/.cursor-*
+prototype/bus/.log.lock
+prototype/worker/*.err
+__pycache__/
+*.pyc
+.DS_Store
