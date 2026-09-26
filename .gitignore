@@ -7,3 +7,5 @@ prototype/worker/*.err
 __pycache__/
 *.pyc
 .DS_Store
+# compat symlink so live sessions keep the old hook path
+/bus
