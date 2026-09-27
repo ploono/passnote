@@ -4,7 +4,7 @@
 - v2 incorporates the multi-agent review in `2026-09-27-passnote-spec-review.md`; finding ids (F1…F43) are cited inline.
 - v2.1 folds in the results of spikes A1–A8 (§13), run on Claude Code 2.1.283 / macOS.
 
-Pending the author's review.
+Approved by the author on 2026-09-27.
 
 **Name:** `passnote`. Renamed from `murmur`, because instavm/murmur (npm `@instavm/murmur`) is an existing agent-bus tool with a `murmur` CLI. On 2026-09-27, `passnote` was free on npm and had no Claude-related GitHub repos. Re-check npm, PyPI and GitHub before release (F42).
 

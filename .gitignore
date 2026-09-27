@@ -9,3 +9,5 @@ __pycache__/
 .DS_Store
 # compat symlink so live sessions keep the old hook path
 /bus
+# raw spike evidence (hook env dumps, transcripts): scrub before committing
+prototype/spikes/
