@@ -11,3 +11,5 @@ __pycache__/
 /bus
 # raw spike evidence (hook env dumps, transcripts): scrub before committing
 prototype/spikes/
+# git worktrees created by Claude Code sessions
+.claude/worktrees/
