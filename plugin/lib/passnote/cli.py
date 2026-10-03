@@ -252,9 +252,10 @@ def cmd_join(args, stdin, stdout, env):
     sessions.update_meta(sid, lambda current: current.update(name_source=source))
     if pid is not None:
         sessions.record_pid(pid, sid)
+    gone = f" (gone: {', '.join(render.escape_text(member) for member in result['gone'])})" if result["gone"] else ""
     stdout.write(f"joined {render.escape_text(result['display'])} ({room}) as {name}\n"
                  f"root: {render.escape_text(result['root'])}\n"
-                 f"members: {', '.join(render.escape_text(member) for member in result['members'])}\n")
+                 f"members: {', '.join(render.escape_text(member) for member in result['members'])}{gone}\n")
     if result["warning"]:
         stdout.write(f"warning: {render.escape_text(result['warning'])}\n")
     try:

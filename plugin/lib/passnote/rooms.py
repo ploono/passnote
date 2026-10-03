@@ -157,11 +157,15 @@ def join(sid, room, name, root, display=None, now=None) -> dict:
 
     sessions.update_meta(sid, record)
     store.append_event(room, {"type": "join", "sid": sid, "name": name})
+    # After the lock (C4): each check can run `ps`. A gone member keeps its place for a resume, but
+    # the joining model must not report it as someone to talk to (issue 16).
+    gone = {other for other in members if other != sid and not is_running(other)}
     return {
         "room": room,
         "display": meta.get("display") or room,
         "root": meta.get("root") or root,
-        "members": sorted(info["name"] for info in members.values()),
+        "members": sorted(info["name"] for other, info in members.items() if other not in gone),
+        "gone": sorted(members[other]["name"] for other in gone),
         "warning": warning,
         "alias": alias,
     }
