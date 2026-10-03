@@ -112,10 +112,14 @@ def _session_checks(results, env, now):
     else:
         results.append((WARN, "the passnote hook has not fired in this session recently",
                         "check that /hooks lists passnote; restart the session after installing"))
-    mine = trust.mode_class(meta.get("permission_mode"))
+    mode = sessions.recorded_mode(sid)
+    if not mode:
+        return  # an unrecorded mode is no class at all: comparing it would flag every member
+    mine = trust.mode_class(mode)
     for room in meta["rooms"]:
         for other, info in sorted(store.load_members(room).items()):
-            if other != sid and trust.mode_class(sessions.recorded_mode(other)) != mine:
+            theirs = sessions.recorded_mode(other) if other != sid else None
+            if theirs and trust.mode_class(theirs) != mine:
                 name = render.escape_text(info["name"])
                 results.append((WARN, f"{name} in {room} is in a different permission class",
                                 "messages between you are held, and only the human sees a held message, not "

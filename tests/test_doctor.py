@@ -89,6 +89,21 @@ class DoctorTest(CliCase):
         sessions.touch_active(self.a)
         self.assertEqual(self.statuses(self.env(self.a))["hook fired in this session"], "ok")
 
+    def class_warnings(self, modes):
+        for sid, name in ((self.a, "alice"), (self.b, "bob"), (self.c, "carol")):
+            self.run_cli(sid, "join", "r", "--as", name)
+        for sid, mode in modes:
+            sessions.update_meta(sid, lambda meta, mode=mode: meta.update(permission_mode=mode))
+        return [label for label in self.statuses(self.env(self.a)) if "different permission class" in label]
+
+    def test_no_class_warning_before_this_sessions_mode_is_recorded(self):
+        self.assertEqual(self.class_warnings([(self.b, "bypassPermissions"), (self.c, "default")]), [])
+
+    def test_no_class_warning_for_a_peer_whose_mode_is_not_recorded(self):
+        # carol's mode is unknown: no warning for her; bob's is known and differs
+        self.assertEqual(self.class_warnings([(self.a, "default"), (self.b, "auto")]),
+                         ["bob in r is in a different permission class"])
+
     def test_hook_fire_older_than_the_session_ttl_is_not_recent(self):
         self.run_cli(self.a, "join", "r", "--as", "alice")
         now = time.time()
