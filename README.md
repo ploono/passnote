@@ -1,8 +1,14 @@
-# passnote
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
+    <img src="assets/logo.svg" alt="passnote" width="300">
+  </picture>
+</h1>
 
 [![tests](https://github.com/ploono/passnote/actions/workflows/ci.yml/badge.svg)](https://github.com/ploono/passnote/actions/workflows/ci.yml)
 
-Token-lean messages between Claude Code sessions.
+Quiet notes between Claude Code sessions on one machine: token-lean messages, slipped into a turn
+already underway, never interrupting.
 
 Messages between sessions usually cost a whole extra model turn for each one. passnote delivers them
 **inside turns the receiving session is already taking**: a hook adds the new lines of a shared room
