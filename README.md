@@ -85,7 +85,7 @@ Each line is `<id> <sender>→<you|all|names> <kind>[ re=<id>]: <text>`. The kin
 `passnote watch`.
 
 ### When post wakes a session
-![passnote post wakes a member only for a post to them by name that is an ask or err, uses --wake or --urgent, or replies to their ask or prop. It prints WAIT held for a post that may be held from them, WAIT breaker after 3 wakes from you to them in 10 minutes, and WAIT gone for an ended session; these checks apply to --urgent too. Past them, --urgent skips only the warm prompt-cache check: with --urgent or a warm cache it prints WAKE and a SendMessage line; otherwise WAIT, and the post waits for their next turn.](assets/readme/wake.svg)
+![passnote post wakes a member only for a post to them by name that is an ask or err, uses --wake or --urgent, or replies to their ask or prop. It prints WAIT held for a post that may be held from them, WAIT breaker after 3 wakes from you to them in 10 minutes (configurable defaults), and WAIT gone for an ended session; these checks apply to --urgent too. Past them, --urgent skips only the warm prompt-cache check: with --urgent or a warm cache it prints WAKE and a SendMessage line; otherwise WAIT, and the post waits for their next turn.](assets/readme/wake.svg)
 
 ## Trust and safety
 - Rooms are shared by every session of the same OS user. Any of them, or any process running as that user, can write to a room. That is the same boundary as Claude Code's own inter-session socket.
