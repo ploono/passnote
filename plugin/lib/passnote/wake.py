@@ -1,9 +1,9 @@
-"""Wake decisions for posts (spec §8): eligibility, cache TTL, warm/cold, breaker, doorbell."""
+"""Wake decisions for posts (spec §8): eligibility, holds, cache TTL, warm/cold, breaker, doorbell."""
 from __future__ import annotations
 
 import time
 
-from . import paths, render, rooms, sessions, store
+from . import paths, render, rooms, sessions, store, trust
 
 ELIGIBLE_KINDS = ("ask", "err")
 REPLY_KINDS = ("ans", "nak", "done")
@@ -77,6 +77,29 @@ def is_eligible(msg, name, target_sid, by_id, members=None) -> bool:
         author = store.member_for_sid(members, target.get("sid"))
         return target.get("sid") == target_sid or (author is not None and author[0] == target_sid)
     return False
+
+
+# trust.content_hold's reasons, as the sender's WAIT line words them.
+_HELD_WORDS = {
+    "permission-mode mismatch": "different permission class",
+    "receiver mode unknown": "its permission mode is not recorded yet",
+    "refuse": "inbound=refuse",
+}
+
+
+def held(msg, target_sid, inbound):
+    """The WAIT reason when `msg` would be held from the session target_sid, else None. A doorbell
+    carries a gist of the text, and a receiver with Claude Code's crossSessionInbound: accept would
+    show it to the model, so a held post never rings one (spec §9: only the human sees a held
+    message). Decided with what the sender can know: the post's stamped mode against the
+    receiver's recorded mode (unrecorded holds, fail closed) and the room's or global inbound.
+    The receiver's own settings and env are invisible here, so PASSNOTE_ALLOW_BYPASS is not
+    assumed (empty env): a receiver launched with it still gets the post on its next turn, it just
+    isn't woken for it."""
+    reason = trust.content_hold(msg, sessions.recorded_mode(target_sid), inbound, {})
+    if reason is None:
+        return None
+    return f"held ({_HELD_WORDS.get(reason, reason)}; only the human sees it)"
 
 
 def _number(value) -> bool:

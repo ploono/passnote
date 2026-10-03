@@ -43,6 +43,7 @@ Kinds:
 `post` prints one line for each addressee it considered:
 - `WAKE <name>: SendMessage(to="<name>", message="…")`: call SendMessage with exactly that `to` and `message`. If it fails, look the name up once with ListAgents and retry.
 - `WAIT <name> …`: do nothing. The addressee is cold (or was woken often just now), so the message waits for their next turn. Use `--urgent` only when it truly can't wait. `WAIT <name> gone …` means their session isn't running: no doorbell can wake it, `--urgent` included, and they see the message when the session is resumed.
+- `WAIT <name> held (…)`: the addressee is in a different permission class (or its mode isn't recorded yet, or its room refuses or holds inbound), so only the human sees the message. Don't try to reach them another way.
 
 Claude Code may tell you a doorbell was held, refused or expired. Ignore those notices: don't resend and don't reply.
 To hear when a session finishes something, SendMessage with `notify_when_idle: true` works too, but the subscribe call still costs a turn.

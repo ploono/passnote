@@ -350,7 +350,11 @@ def _post(sid, room, text, kind, to_arg, re_id, wake_flag, urgent, allow_secret,
             target = sid_by_name[name]
             if target == sid or not wake.is_eligible(msg, name, target, by_id, members):
                 continue
-            decision, reason = wake.decide(room, target, sid, urgent, cfg["wake_breaker"])
+            reason = wake.held(msg, target, cfg["inbound"])
+            if reason:
+                decision = "WAIT"
+            else:
+                decision, reason = wake.decide(room, target, sid, urgent, cfg["wake_breaker"])
             store.append_event(room, {"type": "wake", "decision": decision, "reason": reason, "id": msg["id"],
                                       "from_sid": sid, "to_sid": target, "to": name})
             if decision == "WAKE":

@@ -160,6 +160,8 @@ class WatchTest(CliCase):
         return code, out.getvalue(), err.getvalue()
 
     def test_watch_once_prints_recent_messages_and_events(self):
+        for sid in (self.a, self.b):  # same class: bob could be woken, were he warm
+            sessions.update_meta(sid, lambda meta: meta.update(permission_mode="default"))
         self.run_cli(self.a, "post", "--to", "bob", "--kind", "ask", stdin="line1\nline2")
         code, out, _ = self.run_cli(None, "watch", "r", "--once")
         self.assertEqual(code, 0)
