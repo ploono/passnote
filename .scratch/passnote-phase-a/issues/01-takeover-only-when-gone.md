@@ -25,7 +25,7 @@ If there is no by-pid record, fall back to Claude Code's session registry: `~/.c
 - `post`'s QUEUED reason should say `cold (last active 72m ago; --urgent to force)`, not `idle 72m`, because *idle* means "not in a turn".
 - `who` should show both states, for example `warm`/`cold (last active 72m ago)` and `gone` when applicable.
 
-**4. `gc`:** prune members whose sessions are gone. Age alone must not remove a running session's membership. The one exception: a member whose state can't be determined (no by-pid record and no registry file) and that has been inactive for more than 7 days, so a crash can't block a name forever.
+**4. `gc` (amended 2026-10-03, see Comments):** prune members whose sessions are gone. Age alone must not remove a running session's membership. The one exception: a member whose state can't be determined (no by-pid record and no registry file) and that has been inactive for more than 7 days, so a crash can't block a name forever.
 
 ## Tests
 
@@ -35,3 +35,16 @@ If there is no by-pid record, fall back to Claude Code's session registry: `~/.c
 - QUEUED reason text uses "last active".
 
 ## Comments
+
+**2026-10-03: amends §4 (gc).** The Task 18 end-to-end run found that a closed session lost its rooms
+as soon as anyone ran `passnote join`, because gc pruned gone members at once. Gone sessions can be
+resumed with the same session id (spec §5), so this was wrong.
+
+Decision: gc treats a **gone** member like an **unknown** one. It prunes a session, with its
+memberships and cursors, only when the session is gone or unknown **and** has been inactive for more
+than 7 days (`--days`). A running session is never pruned. So a resumed session keeps its rooms.
+
+Two things are unchanged:
+- Takeover of a gone member's name is still immediate (`join` and `rename` use `is_running`).
+- The orphan sweep still removes members with no session dir, or with a key that isn't a session
+  id, at once: such a member can't be resumed.

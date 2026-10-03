@@ -1,0 +1,44 @@
+#!/usr/bin/env python3
+"""passnote entrypoint. `passnote hook <event>` never exits non-zero; everything else is the CLI."""
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "lib"))
+
+
+def _hook():
+    try:
+        from passnote import hook
+        # Bytes decoded as UTF-8 whatever the locale: `python3 -I` ignores PYTHONUTF8 and
+        # PYTHONIOENCODING, and a locale decode error would silently stop delivery (F12-2).
+        stdin_text = sys.stdin.buffer.read().decode("utf-8", "replace")
+        out = hook.main(sys.argv[2] if len(sys.argv) > 2 else "", stdin_text)
+        if out:
+            sys.stdout.write(out + "\n")
+            sys.stdout.flush()
+    except BaseException:
+        _silence_stdout()
+    return 0
+
+
+def _silence_stdout():
+    """A failed write or flush (the reader is gone) leaves the output buffered, and Python's own
+    flush at exit would fail again and exit 120. Point fd 1 at /dev/null so that one succeeds."""
+    try:
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, 1)
+        os.close(devnull)
+    except BaseException:
+        pass
+
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "hook":
+        sys.exit(_hook())
+    # UTF-8 whatever the locale (as for the hook): a message with non-ASCII text must neither crash
+    # `post` (stdin) nor `read` (stdout). Not for the hook path, which decodes its own bytes.
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+    from passnote.cli import main
+    sys.exit(main())

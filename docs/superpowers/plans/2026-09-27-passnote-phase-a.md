@@ -25,7 +25,8 @@
 1. **Module layout (§4).** The spec lists `bin/passnote` as a "single-file CLI (all logic)". This plan keeps `bin/passnote` as the only entrypoint, but splits the logic into focused modules under `plugin/lib/passnote/`, so each unit can be tested and reviewed on its own. There is no behavior difference.
 2. **Version gate (§11).** The guard does **not** check the Claude Code version, because hooks have no cheap way to learn it. `passnote doctor` enforces ≥ 2.1.283 instead, and the README states it.
 3. **`(mode?)` cross-check (§9).** Comparing passnote's mode stamp against Claude Code's native `from-mode` on doorbells is deferred to Phase D, because the hook can't see doorbell contents today. passnote's own holds are unaffected.
-4. **CI matrix (§12).** CI runs Python 3.9 on Linux only; macOS runs 3.13, because hosted macOS runners no longer reliably ship 3.9.
+4. **CI matrix (§12).** setup-python provides 3.9 on Linux only; on macOS it provides the latest Python, because hosted macOS runners no longer reliably offer 3.9 through it. macOS also runs the suite on the system `/usr/bin/python3` (3.9.6), the interpreter most macOS users have.
+5. **No Python version check in the guard (§4, §7).** `guard.sh` checks the platform and that `python3` exists, but not its version: that would cost a Python start on every fire. Below 3.9, `hook.main` returns nothing, which behaves the same, at the price of one Python start per fire for a joined session.
 
 **Also, one spec gap closed:** posts made in the same shell command as `join` carry `mode: unknown`, because no hook has recorded the mode yet. Receivers then fall back to the sender's recorded mode (Tasks 5 and 12) instead of holding every such post.
 
@@ -114,12 +115,15 @@ plugin/
   lib/passnote/cli.py               argparse CLI (Tasks 14, 15)
   lib/passnote/doctor.py            `passnote doctor` checks (Task 16)
 .claude-plugin/marketplace.json     marketplace pointing at ./plugin (Task 17)
-tests/support.py                    HomeCase, helpers (Task 1, extended in Task 12)
+tests/support.py                    HomeCase, helpers (Task 1, extended in Tasks 12 and 14)
 tests/test_*.py                     one file per module
 tests/fixtures/transcript_delivered.jsonl   real record shape from spike A1 (Task 11)
 tests/integration/test_headless.py  opt-in, needs Claude auth (Task 18)
-.github/workflows/ci.yml            unit tests on macOS/Linux × Python 3.9/3.13 (Task 17)
-README.md, LICENSE                  (Task 17)
+.github/workflows/ci.yml            unit tests: Linux × Python 3.9 and latest, macOS × latest and system 3.9;
+                                    -X dev -W error and a test-count floor; shellcheck; ruff (Task 17)
+.github/dependabot.yml              github-actions updates, weekly (Task 17)
+pyproject.toml                      ruff settings only, no packaging (Task 17)
+README.md, LICENSE, SECURITY.md, CHANGELOG.md, .gitattributes   (Task 17)
 ```
 
 Run all unit tests with: `python3 -m unittest discover -s tests -v` (from the repo root).
@@ -2243,11 +2247,12 @@ class TrustTest(unittest.TestCase):
 
     def test_secret_guard(self):
         positives = [
-            "-----BEGIN OPENSSH PRIVATE KEY-----",
-            "key AKIAABCDEFGHIJKLMNOP here",
-            "sk-ant-api03-abcdefghijklmnopqrstuvwxyz",
-            "ghp_" + "a" * 36,
-            "xoxb-1234567890-abcdef",
+            # Built at runtime: the repo is public, and no committed file holds a whole secret shape.
+            "-----BEGIN OPENSSH " + "PRIVATE KEY-----",
+            "key " + "AKIA" + "ABCDEFGHIJKLMNOP here",
+            "sk-" + "ant-api03-abcdefghijklmnopqrstuvwxyz",
+            "gh" + "p_" + "a" * 36,
+            "xox" + "b-1234567890-abcdef",
             "API_KEY=abcd1234abcd1234abcd",
             'DB_PASSWORD: "correcthorsebatterystaple"',
         ]
