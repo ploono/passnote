@@ -219,7 +219,7 @@ class PageTest(unittest.TestCase):
 
 
 class DemoTest(unittest.TestCase):
-    """v2 demo: two session cards and a flying folded note, three short beats (brief v2)."""
+    """The demo: two session cards and a flying folded note, in three short beats."""
 
     @classmethod
     def setUpClass(cls):
@@ -327,7 +327,7 @@ class ContentTest(unittest.TestCase):
         cls.page = Page(cls.source)
         cls.readme = read(os.path.join(ROOT, "README.md"))
 
-    def test_sections_come_in_the_brief_order(self):
+    def test_sections_come_in_order(self):
         order = ["hero", "demo", "how", "qlane", "faq"]
         positions = [self.source.find(f'id="{ident}"') for ident in order]
         self.assertNotIn(-1, positions)

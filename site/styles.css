@@ -210,7 +210,7 @@ details>summary::-webkit-details-marker{display:none}
   details[open]::details-content{block-size:auto}
 }
 
-/* Usage chart: HTML labels in text ink, never in the bar colour (dataviz skill). */
+/* Usage chart: HTML labels in text ink, never in the bar colour. */
 .chart{margin:0}
 .bar-row{margin-bottom:16px}
 .bar-label{display:flex;justify-content:space-between;gap:12px;font-weight:600;margin-bottom:6px}
