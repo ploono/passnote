@@ -402,7 +402,8 @@ def cmd_read(args, stdin, stdout, env):
         stdout.write(f"({unrecorded} message(s) not shown until this session's permission mode is recorded; "
                      "run passnote read again in a separate command)\n")
     if held:
-        stdout.write(f"({held} held message(s) not shown; the human can see them with `passnote watch`)\n")
+        stdout.write(f"({held} held message(s) not shown; the human can see them with `passnote watch` "
+                     "outside Claude Code)\n")
     return 0
 
 

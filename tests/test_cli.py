@@ -293,7 +293,8 @@ class ReadTest(CliCase):
         self.run_cli(self.a, "post", stdin="push it")
         _, out, _ = self.run_cli(self.b, "read")
         self.assertNotIn("push it", out)
-        self.assertIn("1 held message(s) not shown", out)
+        self.assertIn("(1 held message(s) not shown; the human can see them with `passnote watch` "
+                      "outside Claude Code)", out)
 
     def test_read_holds_when_the_reader_has_no_recorded_mode(self):
         self.run_cli(self.a, "post", stdin="hi")

@@ -8,9 +8,9 @@ FIXTURE = os.path.join(ROOT, "tests", "fixtures", "transcript_delivered.jsonl")
 
 
 class TranscriptTest(HomeCase):
-    def test_finds_only_passnote_delivered_ids(self):
-        found = transcript.delivered_ids(FIXTURE, ["a1", "b2", "c3", "d4"])
-        self.assertEqual(found, {"a1", "b2"})
+    def test_a_ref_without_a_line_is_confirmed_by_its_id_in_passnote_records_only(self):
+        refs = [{"id": msg_id} for msg_id in ("a1", "b2", "c3", "d4")]
+        self.assertEqual(transcript.unconfirmed(FIXTURE, refs), [{"id": "c3"}, {"id": "d4"}])
 
     def test_a_ref_with_its_emitted_line_is_confirmed_only_by_that_whole_line(self):
         refs = [{"id": "a1", "line": "a1 alice→you ask: hello"},
@@ -24,8 +24,8 @@ class TranscriptTest(HomeCase):
                          [{"id": ["x"]}])
 
     def test_unreadable_returns_none(self):
-        self.assertIsNone(transcript.delivered_ids(None, ["a1"]))
-        self.assertIsNone(transcript.delivered_ids(os.path.join(self.tmp, "missing.jsonl"), ["a1"]))
+        self.assertIsNone(transcript.unconfirmed(None, [{"id": "a1"}]))
+        self.assertIsNone(transcript.unconfirmed(os.path.join(self.tmp, "missing.jsonl"), [{"id": "a1"}]))
 
     @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root reads any file")
     def test_existing_but_unreadable_returns_none(self):
@@ -34,10 +34,10 @@ class TranscriptTest(HomeCase):
             fh.write(b"{}\n")
         os.chmod(path, 0)
         self.addCleanup(os.chmod, path, 0o600)
-        self.assertIsNone(transcript.delivered_ids(path, ["a1"]))
+        self.assertIsNone(transcript.unconfirmed(path, [{"id": "a1"}]))
 
     def test_id_prefix_is_not_a_match(self):
-        self.assertEqual(transcript.delivered_ids(FIXTURE, ["a"]), set())
+        self.assertEqual(transcript.unconfirmed(FIXTURE, [{"id": "a"}]), [{"id": "a"}])
 
     def test_malformed_transcript_never_raises(self):
         path = os.path.join(self.tmp, "bad.jsonl")
@@ -46,7 +46,7 @@ class TranscriptTest(HomeCase):
             fh.write(b'{"attachment": ' + b"[" * 100000 + b" hook_additional_context\n")
             fh.write(b'{"attachment": 5, "x": "hook_additional_context"}\n')
             fh.write(b'{"attachment": {"type": "hook_additional_context", "content": {"a": 1}}}\n')
-        self.assertEqual(transcript.delivered_ids(path, ["a1"]), set())
+        self.assertEqual(transcript.unconfirmed(path, [{"id": "a1"}]), [{"id": "a1"}])
 
 
 class TailLinesTest(HomeCase):

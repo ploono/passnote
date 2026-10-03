@@ -2,7 +2,8 @@
 
 When another plugin's UserPromptSubmit hook blocks a prompt, our additionalContext is dropped
 silently. The next fire checks that the lines it emitted appear in a passnote-headed
-hook_additional_context record; anything missing is redelivered once. The transcript format is
+hook_additional_context record (the ids, for an emit state written by an older passnote);
+anything missing is redelivered once. The transcript format is
 internal to Claude Code, so an unreadable transcript returns None and the check is skipped.
 """
 from __future__ import annotations
@@ -25,13 +26,6 @@ def unconfirmed(path, refs):
                             if not isinstance(ref.get("line"), str) and isinstance(ref.get("id"), str)})
     return [ref for ref in refs if not (ref["line"] in lines if isinstance(ref.get("line"), str)
                                         else isinstance(ref.get("id"), str) and ref["id"] in by_id)]
-
-
-def delivered_ids(path, ids):
-    lines = headed_lines(path)
-    if lines is None:
-        return None
-    return _ids_in(lines, {msg_id for msg_id in ids if isinstance(msg_id, str)})
 
 
 def _ids_in(lines, wanted):
