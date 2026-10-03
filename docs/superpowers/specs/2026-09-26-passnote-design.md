@@ -1,5 +1,7 @@
 # passnote: token-lean cross-session communication for Claude Code
 
+Amended by .scratch/passnote-phase-a/issues/01 (takeover only when gone; gc keeps gone members 7 days) and 02 (WAIT / overflow / unanswered).
+
 **Status:** spec v2.1 (2026-09-27).
 - v2 incorporates the multi-agent review in `2026-09-27-passnote-spec-review.md`; finding ids (F1…F43) are cited inline.
 - v2.1 folds in the results of spikes A1–A8 (§13), run on Claude Code 2.1.283 / macOS.
@@ -296,14 +298,14 @@ Escaping is **a security control, not cosmetics** (A4). A raw newline let a forg
 
 **Decision per eligible addressee:**
 - warm → WAKE;
-- cold → QUEUED (the message waits for the addressee's next turn);
+- cold → WAIT (the message waits for the addressee's next turn);
 - `--urgent` → WAKE.
 
-A breaker allows at most 3 wakes per (sender, addressee) per 10 minutes (configurable). Past that, the decision is QUEUED with `breaker`. Every decision is appended to `events.jsonl`.
+A breaker allows at most 3 wakes per (sender, addressee) per 10 minutes (configurable). Past that, the decision is WAIT with `breaker`. Every decision is appended to `events.jsonl`.
 
 **`post` output contract** (F23).
 - Line 1 is `ok <id>`.
-- Then one line per eligible addressee: either `WAKE <name>: SendMessage(to="<name>", message="<id> <from>: <gist ≤80 chars>")`, or `QUEUED <name> cold (idle 72m; --urgent to force)`.
+- Then one line per eligible addressee: either `WAKE <name>: SendMessage(to="<name>", message="<id> <from>: <gist ≤80 chars>")`, or `WAIT <name> cold (last active 72m ago; --urgent to force)`.
 
 Exit codes:
 

@@ -1,0 +1,42 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact|fork",
+        "hooks": [
+          {"type": "command", "command": "/bin/sh", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh", "SessionStart"], "timeout": 5}
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "clear",
+        "hooks": [
+          {"type": "command", "command": "/bin/sh", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh", "SessionEnd"], "timeout": 5}
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {"type": "command", "command": "/bin/sh", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh", "UserPromptSubmit"], "timeout": 5}
+        ]
+      }
+    ],
+    "PostToolBatch": [
+      {
+        "hooks": [
+          {"type": "command", "command": "/bin/sh", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh", "PostToolBatch"], "timeout": 5}
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {"type": "command", "command": "/bin/sh", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh", "PreToolUse"], "timeout": 5}
+        ]
+      }
+    ]
+  }
+}

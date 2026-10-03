@@ -1,0 +1,14 @@
+{
+  "name": "passnote",
+  "owner": {"name": "Nazar Kuzmenko"},
+  "description": "passnote: token-lean messages between Claude Code sessions on one machine.",
+  "plugins": [
+    {
+      "name": "passnote",
+      "source": "./plugin",
+      "description": "Token-lean messages between Claude Code sessions: shared room logs delivered by hooks, with cache-aware doorbells.",
+      "category": "productivity",
+      "tags": ["messaging", "sessions", "coordination"]
+    }
+  ]
+}
