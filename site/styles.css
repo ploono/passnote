@@ -248,5 +248,7 @@ main>section.qlane{padding:0}
 
 @media (prefers-reduced-motion: reduce){
   html{scroll-behavior:auto}
-  *,*::before,*::after,::details-content{transition:none!important;animation:none!important}
+  *,*::before,*::after{transition:none!important;animation:none!important}
+  /* Its own rule: a browser that doesn't know ::details-content drops the whole selector list. */
+  ::details-content{transition:none!important}
 }
