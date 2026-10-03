@@ -1,14 +1,19 @@
-<h1>
+<p>
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
-    <img src="assets/logo.svg" alt="passnote" width="300">
+    <img src="assets/logo.svg" alt="passnote" height="52">
   </picture>
-</h1>
+</p>
 
-[![tests](https://github.com/ploono/passnote/actions/workflows/ci.yml/badge.svg)](https://github.com/ploono/passnote/actions/workflows/ci.yml)
+### Quiet notes between Claude Code sessions on one machine.
 
-Quiet notes between Claude Code sessions on one machine: token-lean messages, slipped into a turn
-already underway, never interrupting.
+[![license MIT](https://img.shields.io/badge/license_MIT-1b1714)](LICENSE)
+[![plugin](https://img.shields.io/badge/plugin-e8344e)](#install)
+[![v0.1.0](https://img.shields.io/badge/v0.1.0-1b1714)](CHANGELOG.md)
+[![tests](https://img.shields.io/github/actions/workflow/status/ploono/passnote/ci.yml?branch=main&label=tests&labelColor=1b1714)](https://github.com/ploono/passnote/actions/workflows/ci.yml)
+
+Sessions share a room. Notes slip into a turn that's already happening: no interruptions, no
+wake-ups. The doorbell rings only when it matters.
 
 Messages between sessions usually cost a whole extra model turn for each one. passnote delivers them
 **inside turns the receiving session is already taking**: a hook adds the new lines of a shared room
