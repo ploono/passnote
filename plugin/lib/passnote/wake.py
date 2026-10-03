@@ -79,27 +79,37 @@ def is_eligible(msg, name, target_sid, by_id, members=None) -> bool:
     return False
 
 
-# trust.content_hold's reasons, as the sender's WAIT line words them.
+# The sender's WAIT line for each trust.content_hold reason, plus one for an unknown sender mode.
+# PASSNOTE_ALLOW_BYPASS lifts a class mismatch, never an inbound refuse or hold (trust.hold_reason).
 _HELD_WORDS = {
-    "permission-mode mismatch": "different permission class",
-    "receiver mode unknown": "its permission mode is not recorded yet",
-    "refuse": "inbound=refuse",
+    "refuse": "inbound=refuse; only the human sees it",
+    "inbound=hold": "inbound=hold; only the human sees it",
+    "permission-mode mismatch": "different permission class; only the human sees it unless the receiver allows bypass",
+    "receiver mode unknown": "its permission mode is not recorded yet; it is delivered on their next turn if your "
+                             "classes match",
+    "sender mode unknown": "your permission mode is not recorded yet; no doorbell",
 }
 
 
 def held(msg, target_sid, inbound):
-    """The WAIT reason when `msg` would be held from the session target_sid, else None. A doorbell
+    """The WAIT reason when `msg` may be held from the session target_sid, else None. A doorbell
     carries a gist of the text, and a receiver with Claude Code's crossSessionInbound: accept would
-    show it to the model, so a held post never rings one (spec §9: only the human sees a held
-    message). Decided with what the sender can know: the post's stamped mode against the
-    receiver's recorded mode (unrecorded holds, fail closed) and the room's or global inbound.
+    show it to the model, so a post that may be held never rings one (spec §9: only the human sees
+    a held message). Decided with what the sender can know: the post's stamped mode against the
+    receiver's recorded mode and the room's or global inbound. Either mode unknown means no
+    doorbell (fail closed); for an unknown sender mode (a post in the same command as `join`) this
+    is the wake's call only: delivery decides again once the mode is recorded.
     The receiver's own settings and env are invisible here, so PASSNOTE_ALLOW_BYPASS is not
     assumed (empty env): a receiver launched with it still gets the post on its next turn, it just
     isn't woken for it."""
     reason = trust.content_hold(msg, sessions.recorded_mode(target_sid), inbound, {})
+    if reason not in ("refuse", "inbound=hold"):
+        mode = trust.sender_mode(msg)
+        if not (isinstance(mode, str) and mode):
+            reason = "sender mode unknown"
     if reason is None:
         return None
-    return f"held ({_HELD_WORDS.get(reason, reason)}; only the human sees it)"
+    return f"held ({_HELD_WORDS.get(reason, reason)})"
 
 
 def _number(value) -> bool:

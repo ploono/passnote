@@ -145,7 +145,7 @@ class PostTest(CliCase):
 
     def test_broadcast(self):
         set_mode(self.a, None)  # no hook has recorded alice's mode yet: the post is stamped "unknown"
-        code, out, _ =self.run_cli(self.a, "post", stdin="hello all\n")
+        code, out, _ = self.run_cli(self.a, "post", stdin="hello all\n")
         self.assertEqual((code, out), (0, "ok a1\n"))
         msg = store.iter_messages("r")[-1][1]
         self.assertEqual((msg["text"], msg["to"], msg["kind"], msg["mode"]), ("hello all", "all", "say", "unknown"))
@@ -160,31 +160,43 @@ class PostTest(CliCase):
         self.assertEqual(store.read_events("r")[-1]["decision"], "WAKE")
 
     def assert_held_wait(self, out, why):
-        self.assertEqual(out.splitlines()[1:], [f"WAIT bob held ({why}; only the human sees it)"])
+        self.assertEqual(out.splitlines()[1:], [f"WAIT bob held ({why})"])
         self.assertNotIn("WAKE", out)
         self.assertNotIn("SendMessage", out)
         event = store.read_events("r")[-1]
         self.assertEqual((event["type"], event["decision"], event["to"]), ("wake", "WAIT", "bob"))
-        self.assertEqual(event["reason"], f"held ({why}; only the human sees it)")
+        self.assertEqual(event["reason"], f"held ({why})")
 
     def test_a_warm_recipient_in_another_permission_class_is_not_woken(self):
         set_mode(self.b, "bypassPermissions")
         sessions.touch_active(self.b)
         for flags in ((), ("--urgent",)):
             _, out, _ = self.run_cli(self.a, "post", "--to", "bob", "--kind", "ask", *flags, stdin="secret plan?")
-            self.assert_held_wait(out, "different permission class")
+            self.assert_held_wait(out, "different permission class; only the human sees it unless the receiver allows bypass")
 
     def test_a_recipient_whose_mode_is_not_recorded_is_not_woken(self):
         set_mode(self.b, None)
         sessions.touch_active(self.b)
         _, out, _ = self.run_cli(self.a, "post", "--to", "bob", "--kind", "ask", stdin="secret plan?")
-        self.assert_held_wait(out, "its permission mode is not recorded yet")
+        self.assert_held_wait(out, "its permission mode is not recorded yet; "
+                                   "it is delivered on their next turn if your classes match")
 
     def test_room_inbound_refuse_wakes_nobody(self):
         paths.atomic_write_json(os.path.join(paths.room_dir("r"), "config.json"), {"inbound": "refuse"})
         sessions.touch_active(self.b)
         _, out, _ = self.run_cli(self.a, "post", "--to", "bob", "--kind", "ask", stdin="secret plan?")
-        self.assert_held_wait(out, "inbound=refuse")
+        self.assert_held_wait(out, "inbound=refuse; only the human sees it")
+
+    def test_a_sender_whose_mode_is_not_recorded_rings_no_doorbell(self):
+        # A post in the same command as join: stamped "unknown", and no hook has recorded the mode
+        # yet. Its class is unknown, so no doorbell either way, and no claim that the classes differ.
+        set_mode(self.a, None)
+        sessions.touch_active(self.b)
+        for mode in ("bypassPermissions", "default"):
+            with self.subTest(receiver=mode):
+                set_mode(self.b, mode)
+                _, out, _ = self.run_cli(self.a, "post", "--to", "bob", "--kind", "ask", stdin="secret plan?")
+                self.assert_held_wait(out, "your permission mode is not recorded yet; no doorbell")
 
     def test_urgent_wakes_a_cold_session(self):
         _, out, _ = self.run_cli(self.a, "post", "--to", "bob", "--urgent", stdin="now")
