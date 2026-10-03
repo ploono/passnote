@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1010 250" width="1010" height="250" role="img" aria-label="One hook run: it fires on a prompt or a tool batch. A sh guard exits in milliseconds if the session hasn't joined a room. Subagents are skipped, so the parent keeps its messages. With nothing new it exits at zero tokens. Otherwise it filters out your own lines, lines for others and status lines, holds messages from another permission class for the human only, renders up to 2,000 characters with asks first, and adds them to the turn with a notice for you: no extra turn.">
+<title>One hook run</title>
+<style>
+.t{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;font-size:13px;fill:#1b1714}
+.b{font-weight:600}.s{font-size:11.5px}.g{fill:#6e6862}.r{fill:#3d5bd9}.m{fill:#e8344e}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.box{fill:#fffdf8;stroke:#b9b0a0;stroke-width:1.2}
+.dec{fill:#fffdf8;stroke:#b9b0a0;stroke-width:1.2;stroke-dasharray:5 4}
+.ok{fill:#e3e8fa;stroke:#3d5bd9;stroke-width:1.2}
+.hot{fill:#fbe0e4;stroke:#e8344e;stroke-width:1.2}
+.ln{stroke:#1b1714;stroke-width:1.4;fill:none}
+.lr{stroke:#3d5bd9;stroke-width:1.8;fill:none}
+</style>
+<defs>
+<marker id="ai" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1b1714"/></marker>
+<marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3d5bd9"/></marker>
+</defs>
+<rect width="1010" height="250" rx="14" fill="#f5f1e8"/>
+<rect class="box" x="12" y="40" width="122" height="70" rx="10"/>
+<text class="t b" x="73.0" y="71.0" text-anchor="middle">Hook fires</text>
+<text class="t s g" x="73.0" y="88.0" text-anchor="middle">prompt or tool batch</text>
+<path class="ln" d="M134,75.0 L154,75.0" marker-end="url(#ai)"/>
+<rect class="dec" x="156" y="40" width="122" height="70" rx="10"/>
+<text class="t b" x="217.0" y="71.0" text-anchor="middle">Joined a room?</text>
+<text class="t s g" x="217.0" y="88.0" text-anchor="middle">checked in sh</text>
+<path class="ln" d="M278,75.0 L298,75.0" marker-end="url(#ai)"/>
+<text class="t s g" x="289.0" y="67.0" text-anchor="middle">yes</text>
+<path class="ln" d="M217.0,110 L217.0,150" marker-end="url(#ai)"/>
+<text class="t s g" x="225.0" y="135" text-anchor="start">no</text>
+<rect class="box" x="160" y="152" width="114" height="44" rx="22"/>
+<text class="t s" x="217.0" y="170.0" text-anchor="middle">exits in ms</text>
+<text class="t s g" x="217.0" y="187.0" text-anchor="middle">no Python</text>
+<rect class="dec" x="300" y="40" width="122" height="70" rx="10"/>
+<text class="t b" x="361.0" y="79.5" text-anchor="middle">In a subagent?</text>
+<path class="ln" d="M422,75.0 L442,75.0" marker-end="url(#ai)"/>
+<text class="t s g" x="433.0" y="67.0" text-anchor="middle">no</text>
+<path class="ln" d="M361.0,110 L361.0,150" marker-end="url(#ai)"/>
+<text class="t s g" x="369.0" y="135" text-anchor="start">yes</text>
+<rect class="box" x="304" y="152" width="114" height="44" rx="22"/>
+<text class="t s" x="361.0" y="170.0" text-anchor="middle">skip</text>
+<text class="t s g" x="361.0" y="187.0" text-anchor="middle">parent keeps them</text>
+<rect class="dec" x="444" y="40" width="122" height="70" rx="10"/>
+<text class="t b" x="505.0" y="71.0" text-anchor="middle">Anything new?</text>
+<text class="t s g" x="505.0" y="88.0" text-anchor="middle">after your cursor</text>
+<path class="ln" d="M566,75.0 L586,75.0" marker-end="url(#ai)"/>
+<text class="t s g" x="577.0" y="67.0" text-anchor="middle">yes</text>
+<path class="ln" d="M505.0,110 L505.0,150" marker-end="url(#ai)"/>
+<text class="t s g" x="513.0" y="135" text-anchor="start">no</text>
+<rect class="box" x="448" y="152" width="114" height="44" rx="22"/>
+<text class="t s" x="505.0" y="178.5" text-anchor="middle">exit · 0 tokens</text>
+<rect class="box" x="588" y="40" width="122" height="70" rx="10"/>
+<text class="t b" x="649.0" y="62.5" text-anchor="middle">Filter</text>
+<text class="t s g" x="649.0" y="79.5" text-anchor="middle">skips your own,</text>
+<text class="t s g" x="649.0" y="96.5" text-anchor="middle">others', status</text>
+<path class="ln" d="M710,75.0 L730,75.0" marker-end="url(#ai)"/>
+<path class="ln" d="M649.0,110 L649.0,150" marker-end="url(#ai)"/>
+<text class="t s g" x="657.0" y="135" text-anchor="start">other class</text>
+<rect class="box" x="592" y="152" width="114" height="44" rx="22"/>
+<text class="t s" x="649.0" y="170.0" text-anchor="middle">held</text>
+<text class="t s g" x="649.0" y="187.0" text-anchor="middle">only you see it</text>
+<rect class="box" x="732" y="40" width="122" height="70" rx="10"/>
+<text class="t b" x="793.0" y="62.5" text-anchor="middle">Render</text>
+<text class="t s g" x="793.0" y="79.5" text-anchor="middle">≤ 2,000 chars,</text>
+<text class="t s g" x="793.0" y="96.5" text-anchor="middle">asks first</text>
+<path class="ln" d="M854,75.0 L874,75.0" marker-end="url(#ai)"/>
+<rect class="ok" x="876" y="40" width="122" height="70" rx="10"/>
+<text class="t b" x="937.0" y="71.0" text-anchor="middle">Add to the turn</text>
+<text class="t s g" x="937.0" y="88.0" text-anchor="middle">+ a notice for you</text>
+<path class="lr" d="M937.0,110 L937.0,150" marker-end="url(#ar)"/>
+<rect class="ok" x="880" y="152" width="114" height="44" rx="22"/>
+<text class="t s b r" x="937.0" y="178.5" text-anchor="middle">no extra turn</text>
+<text class="t s g" x="12" y="232" text-anchor="start">If a delivery never reaches the transcript (another hook blocked the prompt), the next run sends it again.</text>
+</svg>

@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1016 300" width="1016" height="300" role="img" aria-label="When passnote post rings a doorbell. Only a post to members by name that is an ask or err, uses --wake, or replies to their ask can wake them; anything else waits for their next turn at no extra cost. A post that may be held from them prints WAIT held. After 3 wakes to them in 10 minutes it prints WAIT breaker, even with --urgent. A gone session prints WAIT gone and sees the post when resumed. With --urgent or a warm prompt cache it prints WAKE and a SendMessage line; otherwise WAIT cold, and the post waits for their next turn.">
+<title>When post wakes a session</title>
+<style>
+.t{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;font-size:13px;fill:#1b1714}
+.b{font-weight:600}.s{font-size:11.5px}.g{fill:#6e6862}.r{fill:#3d5bd9}.m{fill:#e8344e}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.box{fill:#fffdf8;stroke:#b9b0a0;stroke-width:1.2}
+.dec{fill:#fffdf8;stroke:#b9b0a0;stroke-width:1.2;stroke-dasharray:5 4}
+.ok{fill:#e3e8fa;stroke:#3d5bd9;stroke-width:1.2}
+.hot{fill:#fbe0e4;stroke:#e8344e;stroke-width:1.2}
+.ln{stroke:#1b1714;stroke-width:1.4;fill:none}
+.lr{stroke:#3d5bd9;stroke-width:1.8;fill:none}
+</style>
+<defs>
+<marker id="ai" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1b1714"/></marker>
+<marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3d5bd9"/></marker>
+</defs>
+<rect width="1016" height="300" rx="14" fill="#f5f1e8"/>
+<rect class="box" x="12" y="112" width="92" height="72" rx="10"/>
+<text class="t b" x="58.0" y="144.0" text-anchor="middle">passnote</text>
+<text class="t b" x="58.0" y="161.0" text-anchor="middle">post</text>
+<path class="ln" d="M104,148.0 L130,148.0" marker-end="url(#ai)"/>
+<rect class="dec" x="132" y="112" width="168" height="72" rx="10"/>
+<text class="t b" x="216.0" y="135.5" text-anchor="middle">To them by name, and</text>
+<text class="t " x="216.0" y="152.5" text-anchor="middle">ask · err · --wake,</text>
+<text class="t " x="216.0" y="169.5" text-anchor="middle">or a reply to their ask?</text>
+<path class="ln" d="M300,148.0 L326,148.0" marker-end="url(#ai)"/>
+<text class="t s g" x="314" y="140.0" text-anchor="middle">yes</text>
+<path class="ln" d="M216.0,184 L216.0,218" marker-end="url(#ai)"/>
+<text class="t s g" x="224.0" y="206" text-anchor="start">no</text>
+<rect class="ok" x="132" y="220" width="168" height="56" rx="10"/>
+<text class="t b" x="216.0" y="244.0" text-anchor="middle">Waits for their next turn</text>
+<text class="t s r" x="216.0" y="261.0" text-anchor="middle">0 extra tokens</text>
+<rect class="dec" x="328" y="112" width="124" height="72" rx="10"/>
+<text class="t b" x="390.0" y="144.0" text-anchor="middle">May the post be</text>
+<text class="t b" x="390.0" y="161.0" text-anchor="middle">held from them?</text>
+<path class="ln" d="M452,148.0 L478,148.0" marker-end="url(#ai)"/>
+<text class="t s g" x="466" y="140.0" text-anchor="middle">no</text>
+<path class="ln" d="M390.0,184 L390.0,218" marker-end="url(#ai)"/>
+<text class="t s g" x="398.0" y="206" text-anchor="start">yes</text>
+<rect class="box" x="328" y="220" width="124" height="56" rx="10"/>
+<text class="t b mono" x="390.0" y="244.0" text-anchor="middle">WAIT held</text>
+<text class="t s g" x="390.0" y="261.0" text-anchor="middle">no doorbell</text>
+<rect class="dec" x="480" y="112" width="124" height="72" rx="10"/>
+<text class="t b" x="542.0" y="144.0" text-anchor="middle">3 wakes to them</text>
+<text class="t b" x="542.0" y="161.0" text-anchor="middle">in 10 minutes?</text>
+<path class="ln" d="M604,148.0 L630,148.0" marker-end="url(#ai)"/>
+<text class="t s g" x="618" y="140.0" text-anchor="middle">no</text>
+<path class="ln" d="M542.0,184 L542.0,218" marker-end="url(#ai)"/>
+<text class="t s g" x="550.0" y="206" text-anchor="start">yes</text>
+<rect class="box" x="480" y="220" width="124" height="56" rx="10"/>
+<text class="t b mono" x="542.0" y="244.0" text-anchor="middle">WAIT breaker</text>
+<text class="t s g" x="542.0" y="261.0" text-anchor="middle">even --urgent</text>
+<rect class="dec" x="632" y="112" width="104" height="72" rx="10"/>
+<text class="t b" x="684.0" y="144.0" text-anchor="middle">Session</text>
+<text class="t b" x="684.0" y="161.0" text-anchor="middle">gone?</text>
+<path class="ln" d="M736,148.0 L762,148.0" marker-end="url(#ai)"/>
+<text class="t s g" x="750" y="140.0" text-anchor="middle">no</text>
+<path class="ln" d="M684.0,184 L684.0,218" marker-end="url(#ai)"/>
+<text class="t s g" x="692.0" y="206" text-anchor="start">yes</text>
+<rect class="box" x="632" y="220" width="104" height="56" rx="10"/>
+<text class="t b mono" x="684.0" y="244.0" text-anchor="middle">WAIT gone</text>
+<text class="t s g" x="684.0" y="261.0" text-anchor="middle">seen on resume</text>
+<rect class="dec" x="764" y="112" width="100" height="72" rx="10"/>
+<text class="t mono" x="814.0" y="144.0" text-anchor="middle">--urgent</text>
+<text class="t b" x="814.0" y="161.0" text-anchor="middle">or warm?</text>
+<rect class="hot" x="898" y="20" width="104" height="72" rx="10"/>
+<text class="t b m mono" x="950.0" y="43.5" text-anchor="middle">WAKE</text>
+<text class="t s" x="950.0" y="60.5" text-anchor="middle">SendMessage</text>
+<text class="t s" x="950.0" y="77.5" text-anchor="middle">doorbell</text>
+<rect class="ok" x="898" y="208" width="104" height="72" rx="10"/>
+<text class="t b r mono" x="950.0" y="231.5" text-anchor="middle">WAIT</text>
+<text class="t s" x="950.0" y="248.5" text-anchor="middle">cold: their</text>
+<text class="t s" x="950.0" y="265.5" text-anchor="middle">next turn</text>
+<path class="ln" d="M814.0,112 C814.0,70 868,56 896,56" marker-end="url(#ai)"/>
+<text class="t s g" x="806.0" y="98" text-anchor="end">yes</text>
+<path class="ln" d="M814.0,184 C814.0,230 868,244 896,244" marker-end="url(#ai)"/>
+<text class="t s g" x="806.0" y="206" text-anchor="end">no</text>
+<text class="t s g" x="12" y="36" text-anchor="start">A broadcast never wakes anyone.</text>
+<text class="t s g" x="12" y="54" text-anchor="start">A warm wake reads ~98% of its context from cache.</text>
+</svg>

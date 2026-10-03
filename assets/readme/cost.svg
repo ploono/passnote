@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 340" width="900" height="340" role="img" aria-label="Waking an idle session costs about 15 to 25 thousand input-token-equivalents; a passnote delivery costs about twice the message, tens of tokens. One example wake broken down: three re-reads of the whole context at about 6 thousand each, about 7.5 thousand for thinking and the reply, and about 100 for the message itself.">
+<title>What a message costs</title>
+<style>
+.t{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;font-size:13px;fill:#1b1714}
+.b{font-weight:600}.s{font-size:11.5px}.g{fill:#6e6862}.r{fill:#3d5bd9}.m{fill:#e8344e}.w{fill:#ffffff}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.axis{stroke:#b9b0a0;stroke-width:1}
+</style>
+<rect width="900" height="340" rx="14" fill="#f5f1e8"/>
+
+<text class="t b" x="230" y="54" text-anchor="end">Waking an idle session</text>
+<text class="t s g" x="230" y="71" text-anchor="end">a new turn of 2–3 model calls</text>
+<rect x="245" y="40" width="360" height="34" rx="4" fill="#e8344e"/>
+<rect x="605" y="40" width="240" height="34" rx="4" fill="#e8344e" fill-opacity="0.35"/>
+<text class="t b w" x="593" y="62" text-anchor="end">≈ 15–25k</text>
+
+<text class="t b" x="230" y="110" text-anchor="end">passnote delivery</text>
+<text class="t s g" x="230" y="127" text-anchor="end">lines added to a turn already running</text>
+<rect x="245" y="96" width="2.5" height="34" fill="#3d5bd9"/>
+<text class="t b r" x="257" y="118">≈ 2 × the message: tens of tokens</text>
+
+<line class="axis" x1="245" y1="150" x2="845" y2="150"/>
+<g class="t s g mono" text-anchor="middle">
+<line class="axis" x1="245" y1="150" x2="245" y2="155"/><text x="245" y="170">0</text>
+<line class="axis" x1="365" y1="150" x2="365" y2="155"/><text x="365" y="170">5k</text>
+<line class="axis" x1="485" y1="150" x2="485" y2="155"/><text x="485" y="170">10k</text>
+<line class="axis" x1="605" y1="150" x2="605" y2="155"/><text x="605" y="170">15k</text>
+<line class="axis" x1="725" y1="150" x2="725" y2="155"/><text x="725" y="170">20k</text>
+<line class="axis" x1="845" y1="150" x2="845" y2="155"/><text x="845" y="170">25k</text>
+</g>
+
+<text class="t b" x="30" y="215">Where one wake goes</text>
+<text class="t s g" x="178" y="215">an Opus-class session with ~60k of context</text>
+<rect x="30" y="228" width="197" height="40" fill="#e4ddcf" stroke="#f5f1e8" stroke-width="2"/>
+<rect x="227" y="228" width="197" height="40" fill="#d8d0bf" stroke="#f5f1e8" stroke-width="2"/>
+<rect x="424" y="228" width="197" height="40" fill="#e4ddcf" stroke="#f5f1e8" stroke-width="2"/>
+<rect x="621" y="228" width="246" height="40" fill="#fbe0e4" stroke="#f5f1e8" stroke-width="2"/>
+<rect x="867" y="228" width="3" height="40" fill="#e8344e"/>
+<g text-anchor="middle">
+<text class="t b" x="128" y="290">call 1 re-reads context</text><text class="t s g mono" x="128" y="306">≈ 6k</text>
+<text class="t b" x="325" y="290">call 2 re-reads context</text><text class="t s g mono" x="325" y="306">≈ 6k</text>
+<text class="t b" x="522" y="290">call 3 re-reads context</text><text class="t s g mono" x="522" y="306">≈ 6k</text>
+<text class="t b" x="735" y="290">thinking + reply</text><text class="t s g mono" x="735" y="306">≈ 7.5k (output costs 5×)</text>
+</g>
+<line x1="868.5" y1="270" x2="868.5" y2="314" stroke="#e8344e" stroke-width="1.4"/>
+<text class="t b m" x="862" y="328" text-anchor="end">the message itself: ≈ 100, 0.4%</text>
+</svg>

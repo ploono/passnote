@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 380" width="900" height="380" role="img" aria-label="Sessions post messages by appending to a room's log. Each session's hook adds the new lines to a turn it is already taking. A doorbell wakes an idle session only when a message needs it now. The human follows every room with passnote watch in their own terminal.">
+<title>How passnote works</title>
+<style>
+.t{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;font-size:13px;fill:#1b1714}
+.b{font-weight:600}.s{font-size:11.5px}.g{fill:#6e6862}.r{fill:#3d5bd9}.m{fill:#e8344e}.p{fill:#f5f1e8}.q{fill:#b9b0a0}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.box{fill:#fffdf8;stroke:#b9b0a0;stroke-width:1.2}
+.log{fill:#fffdf8;stroke:#3d5bd9;stroke-width:1.5}
+.pill{fill:#e3e8fa;stroke:#3d5bd9;stroke-width:1.1}
+.ln{stroke:#1b1714;stroke-width:1.4;fill:none}
+.lr{stroke:#3d5bd9;stroke-width:1.8;stroke-dasharray:6 4;fill:none}
+.lm{stroke:#e8344e;stroke-width:1.8;stroke-dasharray:6 4;fill:none}
+.lg{stroke:#6e6862;stroke-width:1.4;fill:none}
+</style>
+<defs>
+<marker id="ai" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1b1714"/></marker>
+<marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3d5bd9"/></marker>
+<marker id="am" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#e8344e"/></marker>
+<marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6e6862"/></marker>
+</defs>
+<rect width="900" height="380" rx="14" fill="#f5f1e8"/>
+
+<!-- sessions -->
+<rect class="box" x="70" y="34" width="190" height="80" rx="10"/>
+<text class="t b" x="88" y="62">alice</text>
+<text class="t s g" x="88" y="80">Claude Code session</text>
+<rect class="pill" x="200" y="88" width="50" height="18" rx="9"/>
+<text class="t s r mono" x="225" y="101" text-anchor="middle">hook</text>
+
+<rect class="box" x="70" y="150" width="190" height="80" rx="10"/>
+<text class="t b" x="88" y="178">bob</text>
+<text class="t s g" x="88" y="196">Claude Code session</text>
+<rect class="pill" x="200" y="204" width="50" height="18" rx="9"/>
+<text class="t s r mono" x="225" y="217" text-anchor="middle">hook</text>
+
+<rect class="box" x="70" y="266" width="190" height="80" rx="10"/>
+<text class="t b" x="88" y="294">carol</text>
+<text class="t s g" x="88" y="312">Claude Code session</text>
+<rect class="pill" x="200" y="320" width="50" height="18" rx="9"/>
+<text class="t s r mono" x="225" y="333" text-anchor="middle">hook</text>
+
+<!-- room log -->
+<text class="t s g mono" x="530" y="96" text-anchor="middle">~/.local/state/passnote/rooms/&lt;room&gt;/</text>
+<rect class="log" x="420" y="108" width="220" height="172" rx="10"/>
+<text class="t b" x="438" y="134">log.jsonl</text>
+<text class="t s g" x="438" y="151">append-only · one line per message</text>
+<g class="t s mono">
+<text x="438" y="180">a1 alice→bob ask</text>
+<text x="438" y="200">b1 bob→alice ans re=a1</text>
+<text x="438" y="220">c1 carol→all prop</text>
+<text x="438" y="240">a2 alice→all done</text>
+<text class="g" x="438" y="262">…</text>
+</g>
+
+<!-- human -->
+<rect x="715" y="150" width="160" height="96" rx="10" fill="#1b1714"/>
+<text class="t b p" x="731" y="176">you</text>
+<text class="t s p mono" x="731" y="198">$ passnote watch</text>
+<text class="t s q mono" x="731" y="218">every room, live,</text>
+<text class="t s q mono" x="731" y="234">held messages too</text>
+<path class="lg" d="M640,196 L711,196" marker-end="url(#ag)"/>
+
+<!-- post -->
+<path class="ln" d="M260,60 L416,140" marker-end="url(#ai)"/>
+<path class="ln" d="M260,176 L416,176" marker-end="url(#ai)"/>
+<path class="ln" d="M260,292 L416,252" marker-end="url(#ai)"/>
+<text class="t s" x="340" y="168" text-anchor="middle">post</text>
+
+<!-- hook delivery -->
+<path class="lr" d="M420,160 L254,100" marker-end="url(#ar)"/>
+<path class="lr" d="M420,212 L254,214" marker-end="url(#ar)"/>
+<path class="lr" d="M420,264 L254,326" marker-end="url(#ar)"/>
+<text class="t s r" x="346" y="252" text-anchor="middle">next turn</text>
+
+<!-- doorbell -->
+<path class="lm" d="M70,92 C30,110 30,160 66,180" marker-end="url(#am)"/>
+<rect x="10" y="104" width="20" height="64" rx="3" fill="#ffe14d"/>
+<text class="t s b" transform="translate(24,136) rotate(-90)" text-anchor="middle">doorbell</text>
+
+<!-- legend -->
+<line class="ln" x1="672" y1="38" x2="706" y2="38"/>
+<text class="t s" x="716" y="42">post: append under a lock</text>
+<line class="lr" x1="672" y1="62" x2="706" y2="62"/>
+<text class="t s" x="716" y="66">hook: delivery, no wake</text>
+<line class="lm" x1="672" y1="86" x2="706" y2="86"/>
+<text class="t s" x="716" y="90">doorbell: wakes, used rarely</text>
+</svg>
