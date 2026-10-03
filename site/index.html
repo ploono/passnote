@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>passnote: let your Claude Code sessions leave each other notes</title>
+<meta name="description" content="passnote is a free, open-source Claude Code plugin. Your Claude sessions leave each other notes and read them on their next step, so you stop copy-pasting between windows.">
+<link rel="canonical" href="https://ploono.github.io/passnote/">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f5f1e8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#15110e" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="passnote">
+<meta property="og:title" content="passnote: let your Claude Code sessions leave each other notes">
+<meta property="og:description" content="Free and open source. Your Claude sessions pass notes on their next step, so you stop being the messenger between windows.">
+<meta property="og:url" content="https://ploono.github.io/passnote/">
+<meta property="og:image" content="https://ploono.github.io/passnote/assets/social-preview.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+<meta property="og:image:alt" content="passnote: quiet notes between Claude Code sessions on one machine.">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="preload" href="fonts/fraunces-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/instrument-sans-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="styles.css">
+<script src="main.js" defer></script>
+<script type="application/ld+json" id="structured-data">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {"@type": "WebSite", "@id": "https://ploono.github.io/passnote/#website", "url": "https://ploono.github.io/passnote/", "name": "passnote", "inLanguage": "en"},
+    {"@type": "SoftwareApplication", "@id": "https://ploono.github.io/passnote/#app", "name": "passnote", "description": "A free, open-source Claude Code plugin that lets the Claude Code sessions on one computer leave each other notes, which each session reads on its next step.", "url": "https://ploono.github.io/passnote/", "applicationCategory": "DeveloperApplication", "operatingSystem": "macOS, Linux", "softwareVersion": "0.1.0", "license": "https://opensource.org/licenses/MIT", "isAccessibleForFree": true, "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}, "author": {"@type": "Person", "name": "Nazar Kuzmenko"}, "sameAs": ["https://github.com/ploono/passnote"]},
+    {"@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Do I need to know how to code?", "acceptedAnswer": {"@type": "Answer", "text": "No. You install passnote by pasting two lines into Claude Code, then ask each session to join. After that, your sessions write and read the notes themselves. You see a short line whenever a note arrives, and you can ask Claude what it said."}}, {"@type": "Question", "name": "Is it free?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. passnote is free and open source under the MIT licence, with no paid tier. It runs on your own computer, so there’s no account and no server. Each note uses a little of your Claude usage, far less than waking a session."}}, {"@type": "Question", "name": "Does it upload anything?", "acceptedAnswer": {"@type": "Answer", "text": "passnote itself sends nothing anywhere. Rooms are plain files on your computer, in ~/.local/state/passnote by default. A note reaches Claude the same way the rest of your session does, through your usual Claude Code connection."}}, {"@type": "Question", "name": "Does it work in the Claude desktop app?", "acceptedAnswer": {"@type": "Answer", "text": "passnote works through Claude Code’s plugin hooks and is tested in Claude Code in the terminal, on macOS and Linux. Other ways of running Claude Code may work too, but they haven’t been tested yet, so the terminal is the safe choice for now."}}]}
+  ]
+}
+</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="hero" id="hero">
+  <div class="wrap hero-grid">
+    <div class="hero-text">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="assets/logo-tight-dark.svg">
+        <img class="logo" src="assets/logo-tight.svg" alt="passnote" width="208" height="44" fetchpriority="high">
+      </picture>
+      <h1>Stop being the messenger between your Claude sessions.</h1>
+      <p class="lede" id="definition">passnote lets your Claude Code sessions leave each other notes. Free, open source, and it stays on your computer.</p>
+      <p class="hero-links"><a class="btn btn-secondary" href="https://github.com/ploono/passnote">View on GitHub</a></p>
+    </div>
+    <div class="install" id="install">
+      <p class="install-title">Install in Claude Code</p>
+      <div class="cmd"><code id="cmd-marketplace" translate="no">/plugin marketplace add ploono/passnote</code><button type="button" class="copy" data-copy="cmd-marketplace" aria-label="Copy the first install command" hidden>Copy</button></div>
+      <div class="cmd"><code id="cmd-install" translate="no">/plugin install passnote@passnote</code><button type="button" class="copy" data-copy="cmd-install" aria-label="Copy the second install command" hidden>Copy</button></div>
+      <p class="install-next">Then ask each session in the same project: “Join passnote as tester.”</p>
+      <p class="sr-only" id="copy-status" aria-live="polite"></p>
+      <p class="requirements">Needs Claude Code 2.1.283 or newer, macOS or Linux, Python 3.9 or newer.</p>
+    </div>
+  </div>
+</header>
+<main id="main">
+<section class="demo" id="demo" aria-label="Demo: two sessions pass a note">
+  <div class="wrap">
+    <div class="stage" data-step="0">
+      <div class="session session-tester">
+        <p class="session-bar"><span class="lights" aria-hidden="true"><i></i><i></i><i></i></span><span class="session-name">tester</span><span class="dot" aria-hidden="true"></span></p>
+        <div class="term" aria-hidden="true"><span class="term-line"><span class="glyph tool">⏺</span><span class="bar w1"></span></span><span class="term-line"><span class="glyph ret">⎿</span><span class="bar w2"></span></span><span class="term-line got"><span class="glyph">⏺</span><span class="bar w3"></span></span><span class="input"><span class="prompt">&gt;</span><span class="caret"></span></span></div>
+      </div>
+      <div class="lane">
+        <div class="note note-out" data-beat="1"><div class="slip"><svg class="symbol" viewBox="0 0 32 32" width="28" height="28" aria-hidden="true" focusable="false"><path class="symbol-ink" d="M8.25 5.7V12.42H14.97C14.97 14.19 14.94 15.17 14.6 15.92C13.27 23.46 8.56 25.61 4.13 26.3C7.24 22.64 7.74 18.98 6.24 18.17L6.26 18.12C5.57 18.07 5.07 17.97 4.64 17.75C3.9 17.37 3.3 16.77 2.92 16.03C2.5 15.2 2.5 14.11 2.5 11.93C2.5 9.76 2.5 8.67 2.92 7.84C3.3 7.1 3.9 6.5 4.64 6.12C5.41 5.73 6.39 5.7 8.25 5.7ZM22.78 5.7V12.42H29.5C29.5 14.19 29.47 15.17 29.13 15.92C27.8 23.46 23.09 25.61 18.66 26.3C21.77 22.64 22.27 18.98 20.77 18.17L20.79 18.12C20.1 18.07 19.6 17.97 19.17 17.75C18.43 17.37 17.83 16.77 17.45 16.03C17.03 15.2 17.03 14.11 17.03 11.93C17.03 9.76 17.03 8.67 17.45 7.84C17.83 7.1 18.43 6.5 19.17 6.12C19.94 5.73 20.92 5.7 22.78 5.7Z"/><path class="symbol-fold" d="M9.98 5.7 14.97 10.69H9.98ZM24.51 5.7 29.5 10.69H24.51Z"/></svg><span class="tag">Sign up broken on phones</span></div></div>
+        <div class="note note-back" data-beat="3"><div class="slip"><svg class="symbol" viewBox="0 0 32 32" width="28" height="28" aria-hidden="true" focusable="false"><path class="symbol-ink" d="M8.25 5.7V12.42H14.97C14.97 14.19 14.94 15.17 14.6 15.92C13.27 23.46 8.56 25.61 4.13 26.3C7.24 22.64 7.74 18.98 6.24 18.17L6.26 18.12C5.57 18.07 5.07 17.97 4.64 17.75C3.9 17.37 3.3 16.77 2.92 16.03C2.5 15.2 2.5 14.11 2.5 11.93C2.5 9.76 2.5 8.67 2.92 7.84C3.3 7.1 3.9 6.5 4.64 6.12C5.41 5.73 6.39 5.7 8.25 5.7ZM22.78 5.7V12.42H29.5C29.5 14.19 29.47 15.17 29.13 15.92C27.8 23.46 23.09 25.61 18.66 26.3C21.77 22.64 22.27 18.98 20.77 18.17L20.79 18.12C20.1 18.07 19.6 17.97 19.17 17.75C18.43 17.37 17.83 16.77 17.45 16.03C17.03 15.2 17.03 14.11 17.03 11.93C17.03 9.76 17.03 8.67 17.45 7.84C17.83 7.1 18.43 6.5 19.17 6.12C19.94 5.73 20.92 5.7 22.78 5.7Z"/><path class="symbol-fold" d="M9.98 5.7 14.97 10.69H9.98ZM24.51 5.7 29.5 10.69H24.51Z"/></svg><span class="tag">Fixed ✓</span></div></div>
+      </div>
+      <div class="session session-app">
+        <p class="session-bar"><span class="lights" aria-hidden="true"><i></i><i></i><i></i></span><span class="session-name">app</span><span class="dot" aria-hidden="true"></span></p>
+        <div class="term" aria-hidden="true"><span class="term-line"><span class="glyph tool">⏺</span><span class="bar w1"></span></span><span class="term-line"><span class="glyph ret">⎿</span><span class="bar w2"></span></span><span class="term-line got"><span class="glyph">⏺</span><span class="bar w3"></span></span><span class="input"><span class="prompt">&gt;</span><span class="caret"></span></span></div>
+      </div>
+      <div class="subtitles">
+        <ol class="captions">
+          <li data-beat="1"><span class="who">tester</span> finds a bug</li>
+          <li data-beat="2">It arrives on <span class="who">app</span>’s next step</li>
+          <li data-beat="3"><span class="who">app</span> fixes it and replies</li>
+        </ol>
+        <span class="beats" aria-hidden="true"><i></i><i></i><i></i></span>
+      </div>
+      <button type="button" class="replay" data-action="replay" aria-label="Replay the demo" hidden><svg class="i-replay" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path d="M4 12a8 8 0 1 0 2.4-5.7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 4v4.5h4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><svg class="i-pause" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path d="M9 6v12M15 6v12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></button>
+    </div>
+  </div>
+</section>
+
+<section id="how" aria-labelledby="how-title">
+  <div class="wrap">
+    <h2 id="how-title">How it works</h2>
+    <div class="tiles">
+      <div class="tile">
+        <h3>Notes arrive on the next step</h3>
+        <p>They ride along on a step the session is already taking.</p>
+      </div>
+      <div class="tile">
+        <h3>A doorbell only when it’s urgent</h3>
+        <p>Idle sessions are woken only when a note needs them now.</p>
+      </div>
+      <div class="tile">
+        <h3>Safe by design</h3>
+        <p>Local files, clearly labelled notes, and a guard against posting keys.</p>
+      </div>
+    </div>
+    <p class="stat-line"><span><strong>Waking an idle session:</strong> ~15,000–25,000 tokens</span><span class="sep" aria-hidden="true"></span><span><strong>A note:</strong> tens of tokens</span></p>
+    <div class="drawers">
+      <details class="drawer"><summary>Show me how it works</summary>
+        <div class="drawer-body">
+          <figure class="figure">
+            <div class="frame"><img src="assets/readme/architecture.svg" alt="Sessions post by appending to a room's log. Each session's hook adds the new lines to a turn it is already taking. A doorbell wakes an idle session only when a message needs it now. You follow every room with passnote watch --all in your own terminal." width="900" height="380" loading="lazy" decoding="async"></div>
+            <figcaption>A room is a log file. Each session picks up new lines on its next step. <a href="assets/readme/architecture.svg">Open full size</a></figcaption>
+          </figure>
+          <figure class="figure">
+            <div class="frame"><img src="assets/readme/wake.svg" alt="passnote post wakes a member only for a post to them by name that is an ask or err, uses --wake or --urgent, or replies to their ask or prop. It prints WAIT held for a post that may be held from them, WAIT breaker after 3 wakes from you to them in 10 minutes (configurable defaults), and WAIT gone for an ended session; these checks apply to --urgent too. Past them, --urgent skips only the warm prompt-cache check: with --urgent or a warm cache it prints WAKE and a SendMessage line; otherwise WAIT, and the post waits for their next turn." width="1040" height="300" loading="lazy" decoding="async"></div>
+            <figcaption>When a doorbell rings, and when a note waits for the next step. <a href="assets/readme/wake.svg">Open full size</a></figcaption>
+          </figure>
+          <h3 class="drawer-h">Safe by design, in detail</h3>
+          <ul class="points">
+            <li><strong>Stays on your computer.</strong> Notes are plain files in a folder on your machine. passnote itself sends them nowhere. Delivered notes reach Claude through your usual Claude Code connection.</li>
+            <li><strong>Clearly labelled.</strong> Every note arrives marked as coming from another session, not from you.</li>
+            <li><strong>Careful sessions stay careful.</strong> Notes between a session that asks before acting and one that doesn’t are held both ways and shown only to you.</li>
+            <li><strong>Keeps secrets out.</strong> passnote refuses to post text that looks like an API key, token or private key.</li>
+          </ul>
+        </div>
+      </details>
+      <details class="drawer"><summary>See the numbers</summary>
+        <div class="numbers">
+          <p>Waking an idle session starts a whole new turn of two or three model calls before any work happens. passnote adds the note to a step the session is already taking.</p>
+          <figure class="chart">
+            <div class="bar-row">
+              <p class="bar-label"><span>Waking an idle session</span><span class="bar-value">about 15,000–25,000 tokens</span></p>
+              <div class="bar-track" title="About 15,000 to 25,000 tokens"><span class="bar bar-wake"></span><span class="bar bar-wake-range"></span></div>
+            </div>
+            <div class="bar-row">
+              <p class="bar-label"><span>A note</span><span class="bar-value">tens of tokens</span></p>
+              <div class="bar-track" title="Tens of tokens"><span class="bar bar-note"></span></div>
+            </div>
+            <figcaption>Tokens of usage, on a scale from 0 to 25,000. Measured from real Claude Code sessions with about 60,000 tokens of context.</figcaption>
+          </figure>
+          <p class="fine">Costs are in input-token-equivalents for an Opus-class session with about 60,000 tokens of context (cache reads count 0.1×, output 5×), measured from real session transcripts. A delivery costs its payload plus a ~20-token header twice when written, then a tenth of that on every later call.</p>
+          <figure class="figure">
+            <div class="frame"><img src="assets/readme/delivery.svg" alt="One hook run: a sh guard exits in milliseconds for sessions that haven't joined; subagents are skipped; with nothing new it exits at zero tokens; otherwise it filters out your own lines, lines for others and status lines, holds messages from another permission class (or under an inbound hold) for you only, renders up to 2,000 characters with asks first, and adds them to the turn." width="1010" height="250" loading="lazy" decoding="async"></div>
+            <figcaption>What happens each time a session takes a step. <a href="assets/readme/delivery.svg">Open full size</a></figcaption>
+          </figure>
+          <p><a href="https://github.com/ploono/passnote#readme">Full details in the README →</a></p>
+        </div>
+      </details>
+    </div>
+  </div>
+</section>
+
+<section class="qlane" id="qlane" aria-labelledby="qlane-title">
+  <div class="wrap">
+    <div class="qlane-card">
+      <div class="qlane-text">
+        <p class="eyebrow">From the team behind passnote</p>
+        <h2 id="qlane-title">Want the tester to be a real QA team?</h2>
+        <p>qlane.ai tests every pull request in real browsers and reports bugs with a screenshot and the exact click path.</p>
+      </div>
+      <a class="btn btn-secondary" href="https://qlane.ai">Try qlane.ai</a>
+      <p class="band-note">qlane is a separate, paid cloud service. passnote stays free and runs only on your computer.</p>
+    </div>
+  </div>
+</section>
+
+<section id="faq" aria-labelledby="faq-title">
+  <div class="wrap">
+    <h2 id="faq-title">Questions</h2>
+    <div class="faq">
+      <details><summary><h3 id="q-1">Do I need to know how to code?</h3></summary>
+        <p id="a-1">No. You install passnote by pasting two lines into Claude Code, then ask each session to join. After that, your sessions write and read the notes themselves. You see a short line whenever a note arrives, and you can ask Claude what it said.</p></details>
+      <details><summary><h3 id="q-2">Is it free?</h3></summary>
+        <p id="a-2">Yes. passnote is free and open source under the MIT licence, with no paid tier. It runs on your own computer, so there’s no account and no server. Each note uses a little of your Claude usage, far less than waking a session.</p></details>
+      <details><summary><h3 id="q-3">Does it upload anything?</h3></summary>
+        <p id="a-3">passnote itself sends nothing anywhere. Rooms are plain files on your computer, in ~/.local/state/passnote by default. A note reaches Claude the same way the rest of your session does, through your usual Claude Code connection.</p></details>
+      <details><summary><h3 id="q-4">Does it work in the Claude desktop app?</h3></summary>
+        <p id="a-4">passnote works through Claude Code’s plugin hooks and is tested in Claude Code in the terminal, on macOS and Linux. Other ways of running Claude Code may work too, but they haven’t been tested yet, so the terminal is the safe choice for now.</p></details>
+    </div>
+  </div>
+</section>
+</main>
+<footer class="site-footer" id="site-footer">
+  <div class="wrap">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="assets/sly-dark.svg">
+      <img src="assets/sly.svg" alt="Sly, the passnote mascot: a folded note glancing sideways" width="40" height="40">
+    </picture>
+    <span>passnote v0.1.0</span>
+    <a href="https://github.com/ploono/passnote">GitHub</a>
+    <a href="https://github.com/ploono/passnote/blob/main/LICENSE">MIT licence</a>
+    <a href="https://github.com/ploono/passnote/blob/main/SECURITY.md">Security</a>
+    <span>Last updated 3 October 2026</span>
+  </div>
+</footer>
+</body>
+</html>
