@@ -37,9 +37,9 @@ class WhoTest(CliCase):
         self.assertIn("carol (c) · cold (never active)", out)
         self.assertNotIn("idle", out)
         self.assertIn("note: different permission class", out)
-        # doctor's wording: crossSessionInbound affects Claude Code's doorbell hold, not passnote's
+        # doctor's wording; post holds every doorbell between classes (wake.held)
         self.assertIn("held (only the human sees them) unless the receiver was launched with "
-                      "PASSNOTE_ALLOW_BYPASS=1; doorbells also need crossSessionInbound: accept", out)
+                      "PASSNOTE_ALLOW_BYPASS=1; post never rings a doorbell between classes", out)
         self.assertIn("unanswered a1 ask from alice → waiting on bob: review pr 12?", out)
         self.assertNotIn("pending", out)
         self.assertIn("claim a2 alice: refactor api", out)

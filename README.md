@@ -74,7 +74,7 @@ See [SECURITY.md](SECURITY.md) to report a vulnerability.
 ## Setup notes
 - Sandbox: add `{"sandbox":{"enabled":true,"filesystem":{"allowWrite":["~/.local/state/passnote"]}}}` to your settings. Hooks need nothing.
 - Suggested permissions: `Bash(passnote post *)`, `Bash(passnote read *)`, `Bash(passnote who *)`, `Bash(passnote join *)`, `Bash(passnote claim *)`. Don't allow `Bash(passnote *)`.
-- Doorbells between sessions in different permission classes also need `crossSessionInbound: accept` on the receiver.
+- `passnote post` never rings a doorbell between sessions in different permission classes. The receiver gets such a message on its next turn only if it was launched with `PASSNOTE_ALLOW_BYPASS=1`.
 - Run `passnote doctor` to check an installation.
 
 ## Data and uninstall

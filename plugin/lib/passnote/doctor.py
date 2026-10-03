@@ -124,7 +124,7 @@ def _session_checks(results, env, now):
                 results.append((WARN, f"{name} in {room} is in a different permission class",
                                 "messages between you are held, and only the human sees a held message, not "
                                 "the model, unless the receiver was launched with PASSNOTE_ALLOW_BYPASS=1; "
-                                "doorbells also need crossSessionInbound: accept"))
+                                "post never rings a doorbell between classes"))
 
 
 def checks(env, runner=subprocess.run, now=None, which=None):

@@ -490,8 +490,8 @@ def cmd_who(args, stdin, stdout, env):
         stdout.write(line + "\n")
         if my_class and member != sid and trust.mode_class(mode) != my_class:
             stdout.write("    note: different permission class; messages between you are held (only the human sees "
-                         "them) unless the receiver was launched with PASSNOTE_ALLOW_BYPASS=1; doorbells also need "
-                         "crossSessionInbound: accept\n")
+                         "them) unless the receiver was launched with PASSNOTE_ALLOW_BYPASS=1; post never rings "
+                         "a doorbell between classes\n")
     for item in state["unanswered"]:
         stdout.write(_unanswered_line(item) + "\n")
     for claim in state["claims"]:
