@@ -1,7 +1,7 @@
 <p>
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
-    <img src="assets/logo.svg" alt="passnote" height="52">
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-tight-dark.svg">
+    <img src="assets/logo-tight.svg" alt="passnote" height="40">
   </picture>
 </p>
 

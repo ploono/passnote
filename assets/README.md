@@ -9,7 +9,8 @@ wordmark, so mark and name read as one.
 
 | File | Use |
 |---|---|
-| `logo.svg`, `logo-dark.svg` | Lockup for light and dark backgrounds (the README switches between them) |
+| `logo.svg`, `logo-dark.svg` | Lockup for light and dark backgrounds, with its clear space built in |
+| `logo-tight.svg`, `logo-tight-dark.svg` | The same lockups cropped to the drawing, for layouts that set their own spacing (the README header) |
 | `logo-mono.svg`, `logo-mono-white.svg` | One-colour lockups |
 | `symbol.svg`, `symbol-dark.svg`, `symbol-mono.svg`, `symbol-mono-white.svg` | The mark alone, 32 px and up |
 | `symbol-16.svg`, `symbol-16-dark.svg` | The mark at 24 px and below: wider gaps so the fold survives |
