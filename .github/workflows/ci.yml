@@ -18,7 +18,7 @@ concurrency:
 
 env:
   # Python 3.9's unittest exits 0 when it finds no tests: fail if fewer than this ran.
-  MIN_TESTS: 395
+  MIN_TESTS: 420
 
 # Actions are pinned by commit; Dependabot (.github/dependabot.yml) updates the pins and comments.
 jobs:
