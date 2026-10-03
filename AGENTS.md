@@ -4,7 +4,7 @@
 
 ### Issue tracker
 
-Issues live as local markdown files under `.scratch/<feature>/`. See `docs/agents/issue-tracker.md`.
+Issues live in GitHub Issues on `ploono/passnote` (use the `gh` CLI). The repo is public, so keep local paths, session ids and secrets out of issue text. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
