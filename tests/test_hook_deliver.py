@@ -137,6 +137,51 @@ class DeliverTest(DeliverCase):
             fh.write(json.dumps(record) + "\n")
         self.assertIsNone(self.deliver(self.b, transcript_path=path))
 
+    @staticmethod
+    def confirm(path, out):
+        """Record `out`'s context in the transcript, as Claude Code does when it reaches the model."""
+        record = {"type": "attachment", "attachment": {"type": "hook_additional_context",
+                                                       "content": [DeliverTest.context(out)]}}
+        with open(path, "a") as fh:
+            fh.write(json.dumps(record) + "\n")
+
+    def test_a_delivered_id_from_another_room_does_not_confirm_a_dropped_one(self):
+        join(self.a, "s", "alice")
+        join(self.b, "s", "bob")
+        path = os.path.join(self.tmp, "t.jsonl")
+        open(path, "w").close()
+        post(self.a, "r", "in r")
+        self.confirm(path, self.deliver(self.b, transcript_path=path))  # "a1 alice→all say: in r" arrived
+        post(self.a, "s", "in s")
+        self.assertIn("a1 alice→all say: in s", self.context(self.deliver(self.b, transcript_path=path)))  # dropped
+        redelivered = self.context(self.deliver(self.b, transcript_path=path))
+        self.assertIn("a1 alice→all say: in s", redelivered)
+        self.assertNotIn("in r", redelivered)
+        self.assertIsNone(self.deliver(self.b, transcript_path=path))  # once
+
+    def test_a_clipped_and_escaped_line_is_confirmed_as_emitted(self):
+        path = os.path.join(self.tmp, "t.jsonl")
+        open(path, "w").close()
+        post(self.a, "r", "line1\nline2 <tag> \x1b[31mred " + "z" * 900)
+        out = self.deliver(self.b, transcript_path=path)
+        line = self.context(out).split("\n")[1]
+        self.assertIn("line1\\nline2 ‹tag› red z", line)
+        self.assertIn("chars: passnote read --id a1)", line)
+        self.assertEqual([ref.get("line") for ref in sessions.load_emit(self.b)["emitted"]], [line])
+        self.confirm(path, out)
+        self.assertIsNone(self.deliver(self.b, transcript_path=path))
+
+    def test_emit_state_from_older_code_is_still_confirmed_by_id(self):
+        path = os.path.join(self.tmp, "t.jsonl")
+        open(path, "w").close()
+        post(self.a, "r", "hello")
+        out = self.deliver(self.b, transcript_path=path)
+        state = sessions.load_emit(self.b)
+        sessions.save_emit(self.b, [{k: v for k, v in ref.items() if k != "line"} for ref in state["emitted"]],
+                           state["overflow"], state["ahead"])
+        self.confirm(path, out)
+        self.assertIsNone(self.deliver(self.b, transcript_path=path))
+
     def test_deleted_log_is_recreated_and_delivery_resumes(self):
         post(self.a, "r", "before-before-before-before")
         self.deliver(self.b)
@@ -384,7 +429,7 @@ class DeliverRulingsTest(DeliverCase):
         def forge(meta):
             meta["transcript_path"] = 1
         sessions.update_meta(self.b, forge)
-        with mock.patch.object(hook.transcript, "delivered_ids", return_value=None) as check:
+        with mock.patch.object(hook.transcript, "unconfirmed", return_value=None) as check:
             self.deliver(self.b, event="UserPromptSubmit")
         check.assert_called_once()
         self.assertIsNone(check.call_args[0][0])
@@ -425,7 +470,11 @@ class DeliverFixRoundTest(DeliverCase):
                     break
                 delivered += self.ordered_ids(self.context(out))
                 self.assertLessEqual(len(sessions.load_emit(self.b)["overflow"]), 8)
-                self.assertLess(self.emit_state_size(self.b), 2000)
+                # The emitted refs' lines are this fire's context lines, bounded by the render
+                # caps; everything else in the emit state is bounded by the overflow cap.
+                lines = sum(len(ref["line"]) for ref in sessions.load_emit(self.b)["emitted"])
+                self.assertLessEqual(lines, len(self.context(out)))
+                self.assertLess(self.emit_state_size(self.b) - lines, 2000)
         self.assertEqual(delivered, posted)
 
     def test_rooms_share_the_overflow_cap(self):

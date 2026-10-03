@@ -154,7 +154,9 @@ def _reserve_for_overflow(n_items) -> int:
 
 
 def build(items, me, budget, clip):
-    """An item's optional "me" (the receiver's name in that item's room) overrides `me`."""
+    """(context, emitted, overflow). An item's optional "me" (the receiver's name in that item's
+    room) overrides `me`. Each emitted entry is a copy of its item plus "line", the exact line the
+    context holds for it, so the hook can confirm that line, not a bare id, in the transcript."""
     if not items:
         return None, [], []
     ordered = sorted(items, key=lambda it: (0 if it.get("redeliver") else 1,
@@ -186,7 +188,7 @@ def build(items, me, budget, clip):
                 cur_clip = max(MIN_CLIP, cur_clip // 2)
                 line = rendered(it, cur_clip)
             lines.append(line)
-            emitted.append(it)
+            emitted.append(dict(it, line=line))
             used += 1 + len(line)
             size += _json_len("\n" + line)
             continue
@@ -197,7 +199,7 @@ def build(items, me, budget, clip):
         cost = _json_len("\n" + line)
         if size + cost <= pack_cap:
             lines.append(line)
-            emitted.append(it)
+            emitted.append(dict(it, line=line))
             used += 1 + len(line)
             size += cost
         else:

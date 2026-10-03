@@ -234,21 +234,24 @@ def _ref_message(ref, rooms_joined):
 
 
 def _take_from_last_fire(fire, state, transcript_path):
-    """Last fire's overflow, plus its emissions the transcript doesn't show. Each unconfirmed ref
-    is re-rendered at most once: it comes back marked "redelivered", and a marked ref is never
-    re-rendered again, so a transcript format drift can't redeliver forever (17a)."""
+    """Last fire's overflow, plus its emissions the transcript doesn't show (each emitted ref holds
+    the exact line rendered for it). Each unconfirmed ref is re-rendered at most once: it comes
+    back marked "redelivered", and a marked ref is never re-rendered again, so a transcript
+    format drift can't redeliver forever (17a)."""
     emitted = [ref for ref in state["emitted"] if isinstance(ref, dict)]
     if emitted:
-        found = transcript.delivered_ids(transcript_path, [ref.get("id") for ref in emitted])
-        if found is None:
+        missing = transcript.unconfirmed(transcript_path, emitted)
+        if missing is None:
             if _once(fire.sid, ".transcript-unreadable"):
                 paths.log_error("hook", note=TRANSCRIPT_UNREADABLE)
         else:
-            for ref in emitted:
-                if ref.get("id") in found or ref.get("redelivered"):
+            for ref in missing:
+                if ref.get("redelivered"):
                     continue
                 msg = _ref_message(ref, fire.rooms)
                 if msg is not None:
+                    # Re-rendered below: the line it is emitted with then is recorded afresh.
+                    ref = {key: value for key, value in ref.items() if key != "line"}
                     _admit(fire, ref["room"], msg, dict(ref, redelivered=True), redeliver=True)
     # At most OVERFLOW_CAP refs are re-read per fire; any beyond (an emit state from before the
     # cap, or a forged one) are carried unread, so a fire's work stays bounded.
@@ -383,9 +386,11 @@ def _deliver_locked(sid, meta, inp, event, env):
     context, emitted, overflow = render.build(fire.items, fire.me, cfg["render_budget_chars"], cfg["clip_chars"])
     message = render.system_message(emitted, fire.held, fire.me)
     # Record what we emit, and what overflowed, before advancing cursors: if this process dies
-    # before its output reaches Claude, the next fire finds these ids missing from the transcript
-    # and redelivers them; overflow renders next fire.
-    emit = {"emitted": [it["ref"] for it in emitted], "overflow": [it["ref"] for it in overflow] + fire.unread,
+    # before its output reaches Claude, the next fire finds these lines missing from the transcript
+    # and redelivers them; overflow renders next fire. An emitted ref keeps its exact line (bounded
+    # by the render caps): ids repeat across rooms, so an id alone can't confirm a delivery.
+    emit = {"emitted": [dict(it["ref"], line=it["line"]) for it in emitted],
+            "overflow": [it["ref"] for it in overflow] + fire.unread,
             "ahead": [ref for room in fire.rooms for ref in fire.ahead.get(room, ())]}
     if emit != state:
         sessions.save_emit(sid, emit["emitted"], emit["overflow"], emit["ahead"])

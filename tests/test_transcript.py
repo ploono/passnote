@@ -12,6 +12,17 @@ class TranscriptTest(HomeCase):
         found = transcript.delivered_ids(FIXTURE, ["a1", "b2", "c3", "d4"])
         self.assertEqual(found, {"a1", "b2"})
 
+    def test_a_ref_with_its_emitted_line_is_confirmed_only_by_that_whole_line(self):
+        refs = [{"id": "a1", "line": "a1 alice→you ask: hello"},
+                {"id": "a1", "line": "a1 alice→all say: same id, another room"},
+                {"id": "b2", "line": "b2 bob→all say: hi"},  # emitted without the [api] prefix
+                {"id": "b2"},  # emit state from before lines were recorded: matched by id
+                {"id": "c3"}]
+        self.assertEqual(transcript.unconfirmed(FIXTURE, refs), [refs[1], refs[2], refs[4]])
+        self.assertIsNone(transcript.unconfirmed(None, refs))
+        self.assertEqual(transcript.unconfirmed(FIXTURE, [{"id": ["x"]}, {"id": "a1", "line": 5}]),
+                         [{"id": ["x"]}])
+
     def test_unreadable_returns_none(self):
         self.assertIsNone(transcript.delivered_ids(None, ["a1"]))
         self.assertIsNone(transcript.delivered_ids(os.path.join(self.tmp, "missing.jsonl"), ["a1"]))

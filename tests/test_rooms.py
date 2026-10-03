@@ -215,6 +215,21 @@ class RoomsTest(HomeCase):
         self.assertEqual(state["emitted"], [])
         self.assertEqual([r["id"] for r in state["overflow"]], ["a2"])
 
+    def test_carry_over_confirms_an_emitted_line_only_in_its_own_room(self):
+        rooms.join(self.a, "r", "alice", "/root")
+        path = os.path.join(self.tmp, "old.jsonl")
+        record = {"type": "attachment", "attachment": {"type": "hook_additional_context",
+                                                       "content": [render.HEADER + "\na1 bob→all say: in r"]}}
+        with open(path, "w") as fh:
+            fh.write(json.dumps(record) + "\n")
+        sessions.update_meta(self.a, lambda meta: meta.update(transcript_path=path))
+        shown = {"room": "r", "off": 0, "len": 10, "id": "a1", "line": "a1 bob→all say: in r"}
+        dropped = {"room": "s", "off": 0, "len": 10, "id": "a1", "line": "a1 bob→all say: in s"}
+        sessions.save_emit(self.a, [shown, dropped], [])
+        new = new_sid()
+        rooms.carry_over(self.a, new)
+        self.assertEqual(sessions.load_emit(new)["overflow"], [{"room": "s", "off": 0, "len": 10, "id": "a1"}])
+
     def test_carry_over_twice_is_harmless_and_never_blanks_the_new_rooms(self):
         rooms.join(self.a, "r", "alice", "/root")
         new = new_sid()

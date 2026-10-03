@@ -172,6 +172,15 @@ class BuildTest(unittest.TestCase):
         self.assertIn("\n[web] a2 alice→you ask: hi\n[api] a1 alice→you say: hi", context)
         self.assertIn("passnote[web]: 1 from alice (ask a2)", render.system_message(emitted, [], "bob"))
 
+
+    def test_each_emitted_item_carries_the_exact_line_rendered_for_it(self):
+        items = [item(msg(id=f"a{i}", seq=i, text=f"{i}\n<b>" + "x" * 700)) for i in range(1, 4)]
+        context, emitted, overflow = render.build(items, "bob", 2000, 600)
+        body = context.split("\n")[1:]
+        self.assertEqual([it["line"] for it in emitted], body[:len(emitted)])
+        self.assertTrue(emitted[0]["line"].startswith("a1 alice→all say: 1\\n‹b›x"))
+        self.assertTrue(all("line" not in it for it in overflow))
+        self.assertTrue(all("line" not in it for it in items))  # the caller's items are not changed
     def test_system_message(self):
         emitted = [item(msg(id="a1", kind="say")), item(msg(id="b2", sid="S-B", **{"from": "bob"}, to=["carol"], kind="ask"))]
         text = render.system_message(emitted, [], "carol")

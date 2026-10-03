@@ -255,8 +255,10 @@ def _carry_emit(old_sid, new_sid, old_meta) -> None:
         return
     emitted = [ref for ref in old_emit["emitted"] if isinstance(ref, dict)]
     path = old_meta.get("transcript_path")
-    found = transcript.delivered_ids(path if isinstance(path, str) else None, [ref.get("id") for ref in emitted])
-    unconfirmed = [ref for ref in emitted if found is None or ref.get("id") not in found]
+    missing = transcript.unconfirmed(path if isinstance(path, str) else None, emitted)
+    # Carried as overflow, to be rendered (and its line recorded) again.
+    unconfirmed = [{key: value for key, value in ref.items() if key != "line"}
+                   for ref in (emitted if missing is None else missing)]
 
     def merged(*lists):
         out, seen = [], set()
