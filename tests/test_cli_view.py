@@ -320,6 +320,39 @@ class WatchTest(CliCase):
         self.assertNotIn("\x1b[", run(TERM="dumb"))
         self.assertNotIn("\x1b[", self.run_cli(None, "watch", "r", "--once")[1])  # not a tty
 
+    def test_brand_palette_with_24_bit_color_else_basic_colors(self):
+        class Tty(io.StringIO):
+            def isatty(self):
+                return True
+
+        self.run_cli(self.a, "post", "--to", "bob", "--kind", "ask", stdin="review pr 12?")
+        self.run_cli(self.a, "post", "--kind", "prop", stdin="ship it")
+        store.append_event("r", {"type": "wake", "decision": "WAKE", "reason": "warm", "id": "a1",
+                                 "to_sid": self.b, "to": "bob"})
+
+        def run(**env_extra):
+            env = {k: v for k, v in os.environ.items() if k not in ("NO_COLOR", "TERM", "COLORTERM")}
+            env.update(TERM="xterm-256color", **env_extra)
+            out = Tty()
+            cli.main(["watch", "r", "--once"], stdin=io.StringIO(), stdout=out, stderr=io.StringIO(), env=env)
+            return out.getvalue().splitlines()
+
+        def line(lines, needle):  # the log line, not the uncoloured "unanswered" summary
+            return next(text for text in lines if needle in text and "unanswered" not in text)
+
+        for value in ("truecolor", "24bit"):
+            lines = run(COLORTERM=value)
+            self.assertTrue(line(lines, "review pr 12?").startswith("\x1b[38;2;232;52;78m"))  # Margin
+            self.assertTrue(line(lines, "ship it").startswith("\x1b[38;2;61;91;217m"))  # Ruled
+            self.assertTrue(line(lines, "wake WAKE bob").startswith(
+                "\x1b[38;2;27;23;20;48;2;255;225;77m"))  # Ink on Highlighter: the doorbell
+            self.assertTrue(line(lines, "· join").startswith("\x1b[38;2;110;104;98m"))  # Graphite
+        lines = run()
+        self.assertTrue(line(lines, "review pr 12?").startswith("\x1b[31m"))
+        self.assertTrue(line(lines, "ship it").startswith("\x1b[36m"))
+        self.assertTrue(line(lines, "wake WAKE bob").startswith("\x1b[30;43m"))
+        self.assertTrue(line(lines, "· join").startswith("\x1b[2m"))
+
 
 class UnsafeHomeTest(CliCase):
     def test_who_watch_and_uninstall_refuse_a_home_others_can_write_to(self):

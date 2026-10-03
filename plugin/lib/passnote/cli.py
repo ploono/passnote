@@ -514,7 +514,18 @@ def cmd_who(args, stdin, stdout, env):
     return 0
 
 
-_KIND_COLORS = {"ask": "31", "err": "31", "nak": "33", "ans": "32", "done": "32", "prop": "36", "claim": "35"}
+def _rgb(r, g, b, layer=38):
+    return f"{layer};2;{r};{g};{b}"
+
+
+# watch's styles, keyed by message kind, "event" and "doorbell" (a wake event that rang one). With
+# 24-bit colour, the brand palette (assets/README.md): Margin red for what needs attention, Ruled
+# blue for data, Graphite for events and Highlighter only for a doorbell. Otherwise basic colours.
+_MARGIN, _RULED, _GRAPHITE = _rgb(232, 52, 78), _rgb(61, 91, 217), _rgb(110, 104, 98)
+_TRUECOLOR_STYLES = {"ask": _MARGIN, "err": _MARGIN, "nak": _MARGIN, "prop": _RULED, "claim": _RULED,
+                     "status": _RULED, "event": _GRAPHITE, "doorbell": _rgb(27, 23, 20) + ";" + _rgb(255, 225, 77, 48)}
+_BASIC_STYLES = {"ask": "31", "err": "31", "nak": "33", "ans": "32", "done": "32", "prop": "36", "claim": "35",
+                 "event": "2", "doorbell": "30;43"}
 
 
 def _describe_event(ev, members):
@@ -532,16 +543,17 @@ def _describe_event(ev, members):
     return str(kind)
 
 
-def _watch_emit(stdout, display, rec, members, color, is_event):
+def _watch_emit(stdout, display, rec, members, styles, is_event):
     stamp = time.strftime("%H:%M:%S", time.localtime(_ts(rec))) if _ts(rec) else "--:--:--"
     if is_event:
         body = f"· {render.gist(_describe_event(rec, members), 200)}"
-        code = "2"
+        key = "doorbell" if rec.get("type") == "wake" and rec.get("decision") == "WAKE" else "event"
     else:
         body = render.render_line(rec, None, members, render.UNBOUNDED)
-        code = _KIND_COLORS.get(rec.get("kind"))
+        key = rec.get("kind")
     line = f"{stamp} [{render.escape_text(display)}] {body}"
-    stdout.write((f"\x1b[{code}m{line}\x1b[0m" if color and code else line) + "\n")
+    code = styles.get(key) if styles else None
+    stdout.write((f"\x1b[{code}m{line}\x1b[0m" if code else line) + "\n")
 
 
 def _ts(rec):
@@ -609,8 +621,11 @@ class _Follow:
             return out
 
 
-def _watch_color(stdout, env) -> bool:
-    return bool(getattr(stdout, "isatty", lambda: False)()) and not env.get("NO_COLOR") and env.get("TERM") != "dumb"
+def _watch_styles(stdout, env):
+    """watch's colour styles, or None for no colour (not a terminal, NO_COLOR, or TERM=dumb)."""
+    if not getattr(stdout, "isatty", lambda: False)() or env.get("NO_COLOR") or env.get("TERM") == "dumb":
+        return None
+    return _TRUECOLOR_STYLES if env.get("COLORTERM") in ("truecolor", "24bit") else _BASIC_STYLES
 
 
 def _records(lines, is_event):
@@ -628,7 +643,7 @@ def cmd_watch(args, stdin, stdout, env):
     if not room_list:
         stdout.write("(no rooms yet)\n")
         return 0
-    color = _watch_color(stdout, env)
+    styles = _watch_styles(stdout, env)
     followed = []
     for room in room_list:
         members = store.load_members(room)
@@ -642,7 +657,7 @@ def cmd_watch(args, stdin, stdout, env):
             recent += [(rec, is_event) for rec in (recs[-args.last:] if args.last > 0 else [])]
             followed.append((room, display, is_event, _Follow(path, ino, off)))
         for rec, is_event in sorted(recent, key=lambda pair: _ts(pair[0])):
-            _watch_emit(stdout, display, rec, members, color, is_event)
+            _watch_emit(stdout, display, rec, members, styles, is_event)
     while not args.once:
         stdout.flush()
         time.sleep(POLL_SECONDS)  # Ctrl-C lands here or in a write: main() turns it into exit 130
@@ -651,7 +666,7 @@ def cmd_watch(args, stdin, stdout, env):
             if recs:
                 members = store.load_members(room)
                 for rec in recs:
-                    _watch_emit(stdout, display, rec, members, color, is_event)
+                    _watch_emit(stdout, display, rec, members, styles, is_event)
     return 0
 
 

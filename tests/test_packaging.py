@@ -77,6 +77,10 @@ class ManifestTest(unittest.TestCase):
         self.assertEqual(plugin["license"], "MIT")
         self.assertIn("messaging", plugin["keywords"])
         self.assertTrue(plugin["description"])
+        # The README's badges are static images: they must say what the manifest says.
+        readme = read(os.path.join(ROOT, "README.md"))
+        self.assertIn(f"img.shields.io/badge/v{__version__}-", readme)
+        self.assertIn(f"img.shields.io/badge/license_{plugin['license']}-", readme)
 
     def test_marketplace(self):
         market = load(os.path.join(ROOT, ".claude-plugin", "marketplace.json"))

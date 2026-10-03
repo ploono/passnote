@@ -21,3 +21,5 @@ The first release, 0.1.0.
   as their parent.
 - The `join`, `leave`, `rooms`, `post`, `claim`, `read`, `who`, `watch`, `gc`, `uninstall`, `shim`
   and `doctor` commands, and the `passnote` skill.
+- The passnote brand (logo, symbol, app icons, social card) in `assets/`; `passnote watch` uses its
+  palette in terminals with 24-bit colour.
