@@ -412,9 +412,30 @@ def _held(room):
             if ev.get("type") == "hold" and isinstance(ev.get("id"), str) and isinstance(ev.get("to_sid"), str)}
 
 
-def _folded(room, members):
-    return fold.fold(_valid_messages(room), members,
-                     {member: cursor.load(member, room) for member in members}, held=_held(room))
+def _folded(room, members, messages=None):
+    messages = _valid_messages(room) if messages is None else messages
+    return fold.fold(messages, members, {member: cursor.load(member, room) for member in members}, held=_held(room))
+
+
+def _who_messages(room, members, sid, meta, env):
+    """(messages, held, unrecorded) for `who` run inside session `sid`: its output reaches the model,
+    so another session's message whose content would be held for this session is left out, whoever
+    it is addressed to (spec §9: only the human sees a held message). Its own messages, including
+    those from before a /clear, are kept."""
+    inbound = trust.effective_inbound(config.load(room)["inbound"],
+                                      claude_settings.inbound(env.get("CLAUDE_PROJECT_DIR")))
+    kept, held, unrecorded = [], 0, 0
+    for msg in _valid_messages(room):
+        sender = store.member_for_sid(members, msg["sid"])
+        reason = None if sender and sender[0] == sid else trust.content_hold(
+            msg, meta.get("permission_mode"), inbound, env)
+        if reason == "receiver mode unknown":
+            unrecorded += 1
+        elif reason:
+            held += 1
+        else:
+            kept.append(msg)
+    return kept, held, unrecorded
 
 
 def _unanswered_line(item):
@@ -440,7 +461,12 @@ def cmd_who(args, stdin, stdout, env):
     room = _existing_room(_room(args, meta))
     members = store.load_members(room)
     rmeta = store.load_meta(room)
-    state = _folded(room, members)
+    held, unrecorded = 0, 0
+    if sid:
+        messages, held, unrecorded = _who_messages(room, members, sid, meta, env)
+        state = _folded(room, members, messages)
+    else:
+        state = _folded(room, members)  # the human's terminal: everything
     now = time.time()
     # Only once this session's mode is recorded: an unrecorded mode would flag every member.
     my_class = trust.mode_class(meta["permission_mode"]) if meta and meta.get("permission_mode") else None
@@ -474,6 +500,12 @@ def cmd_who(args, stdin, stdout, env):
         if prop["unseen"]:
             line += f" · not yet seen by {', '.join(render.escape_text(name) for name in prop['unseen'])}"
         stdout.write(line + "\n")
+    if unrecorded:
+        stdout.write(f"({unrecorded} message(s) not shown until this session's permission mode is recorded; "
+                     "run passnote who again in a separate command)\n")
+    if held:
+        stdout.write(f"({held} message(s) from sessions in a different permission class not shown; "
+                     "the human can see them with passnote watch outside Claude Code)\n")
     return 0
 
 
@@ -582,8 +614,12 @@ def _records(lines, is_event):
 
 
 def cmd_watch(args, stdin, stdout, env):
-    sid, meta = _viewer(env)
-    room_list = _all_rooms() if args.all else [_existing_room(_room(args, meta))]
+    if env.get("CLAUDE_CODE_SESSION_ID"):
+        # Inside a session (even the human's own `!` command) the output lands in the model's
+        # context, and watch shows held messages, which only the human may see (spec §9).
+        raise paths.PassnoteError("watch shows held messages, so it runs only in a terminal outside "
+                                  "Claude Code (see passnote shim)", 2)
+    room_list = _all_rooms() if args.all else [_existing_room(_room(args, None))]
     if not room_list:
         stdout.write("(no rooms yet)\n")
         return 0

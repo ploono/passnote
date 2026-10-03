@@ -43,7 +43,10 @@ class WhoTest(CliCase):
         self.assertIn("unanswered a1 ask from alice → waiting on bob: review pr 12?", out)
         self.assertNotIn("pending", out)
         self.assertIn("claim a2 alice: refactor api", out)
-        self.assertIn("status bob: running tests", out)
+        # bob is in another permission class: his status is held from alice's session, not from the human
+        self.assertNotIn("running tests", out)
+        self.assertIn("(1 message(s) from sessions in a different permission class not shown", out)
+        self.assertIn("status bob: running tests", self.run_cli(None, "who", "--room", "r")[1])
         self.assertIn("prop a4 from alice · seen by nobody · not yet seen by carol", out)
 
     def test_human_who_needs_no_session(self):
@@ -82,6 +85,46 @@ class WhoTest(CliCase):
         store.append_event("r", {"type": "hold", "reason": "mode", "id": "a1", "to_sid": self.c})
         _, out, _ = self.run_cli(None, "who", "--room", "r")
         self.assertIn("prop a1 from alice · seen by bob · not yet seen by carol", out)
+
+    def _different_class_activity(self):
+        """alice is default; bob (bypassPermissions) asks alice, claims work and posts a status."""
+        for sid, mode in ((self.a, "default"), (self.b, "bypassPermissions"), (self.c, "default")):
+            sessions.update_meta(sid, lambda meta, mode=mode: meta.update(permission_mode=mode))
+        self.run_cli(self.b, "post", "--to", "alice", "--kind", "ask", stdin="secret plan?")
+        self.run_cli(self.b, "claim", "bob's hidden work")
+        self.run_cli(self.b, "post", "--kind", "status", stdin="bob status text")
+        self.run_cli(self.a, "post", "--to", "bob", "--kind", "ask", stdin="alice asks bob")
+        self.run_cli(self.a, "claim", "alice work")
+
+    def test_who_in_session_hides_a_different_class_senders_gists(self):
+        self._different_class_activity()
+        code, out, _ = self.run_cli(self.a, "who")
+        self.assertEqual(code, 0)
+        for text in ("secret plan?", "bob's hidden work", "bob status text"):
+            self.assertNotIn(text, out)
+        self.assertIn("unanswered a4 ask from alice → waiting on bob: alice asks bob", out)  # own kept
+        self.assertIn("claim a5 alice: alice work", out)
+        self.assertIn("(3 message(s) from sessions in a different permission class not shown; the human can see "
+                      "them with passnote watch outside Claude Code)", out)
+        _, carol_out, _ = self.run_cli(self.c, "who")  # held regardless of addressing
+        self.assertNotIn("bob status text", carol_out)
+        self.assertNotIn("secret plan?", carol_out)
+
+    def test_human_who_shows_every_senders_gists(self):
+        self._different_class_activity()
+        _, out, _ = self.run_cli(None, "who", "--room", "r")
+        for text in ("secret plan?", "bob's hidden work", "bob status text", "alice asks bob"):
+            self.assertIn(text, out)
+        self.assertNotIn("not shown", out)
+
+    def test_who_hides_others_until_this_sessions_mode_is_recorded(self):
+        self.run_cli(self.b, "post", "--kind", "status", stdin="bob status text")
+        self.run_cli(self.a, "post", "--kind", "status", stdin="alice status text")
+        _, out, _ = self.run_cli(self.a, "who")  # alice's mode is not recorded yet
+        self.assertNotIn("bob status text", out)
+        self.assertIn("alice status text", out)
+        self.assertIn("(1 message(s) not shown until this session's permission mode is recorded; "
+                      "run passnote who again in a separate command)", out)
 
     def test_who_skips_malformed_log_lines_and_escapes_text(self):
         with open(store.log_path("r"), "ab") as fh:
@@ -143,6 +186,15 @@ class WatchTest(CliCase):
         _, out, _ = self.run_cli(None, "watch", "r", "--once")
         self.assertIn("[r] · hold a1 → bob (mode)", out)
         self.assertIn("[r] · hold a1 → ffffffff (mode)", out)
+
+    def test_watch_refuses_to_run_inside_a_claude_session(self):
+        self.run_cli(self.a, "post", "--to", "bob", "--kind", "ask", stdin="held from the model")
+        for argv in (("watch", "r", "--once"), ("watch", "--all", "--once")):
+            with self.subTest(argv=argv):
+                code, out, err = self.run_cli(self.b, *argv)
+                self.assertEqual((code, out), (2, ""))
+                self.assertEqual(err, "passnote: watch shows held messages, so it runs only in a terminal "
+                                      "outside Claude Code (see passnote shim)\n")
 
     def test_unknown_room_is_an_error_and_no_rooms_is_one_line(self):
         for argv in (("who", "--room", "nosuch"), ("watch", "nosuch", "--once")):

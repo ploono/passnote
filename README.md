@@ -50,7 +50,8 @@ next turn. You see a one-line `passnote[room]: …` notice in the terminal every
 To follow the rooms from your own terminal, where `passnote` isn't on your PATH yet: ask Claude to run
 `passnote shim` once (or run `<plugin>/bin/passnote shim`, where `<plugin>` is the plugin's directory
 under `~/.claude/plugins/cache/`). It installs `~/.local/bin/passnote`, which finds the installed plugin
-each time it runs. Then run `passnote watch --all`.
+each time it runs. Then run `passnote watch --all` there. watch shows held messages too, so it refuses to
+run inside a Claude Code session, where its output would reach the model.
 
 ## How it works
 - Each room is an append-only JSONL log in `~/.local/state/passnote/rooms/<room>/`. Every session keeps a byte-offset cursor per room.

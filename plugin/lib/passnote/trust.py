@@ -71,12 +71,20 @@ def visibility(msg, sid, me, receiver_mode, inbound, env):
     `env` is the receiver process's own environment, never values from a log or config file."""
     if msg.get("sid") == sid or msg.get("kind") == "status" or not addressed(msg, me):
         return "skip", None
+    reason = content_hold(msg, receiver_mode, inbound, env)
+    return ("hold", reason) if reason else ("deliver", None)
+
+
+def content_hold(msg, receiver_mode, inbound, env):
+    """Why a receiver in `receiver_mode` must not see `msg`'s content, whoever it is addressed to:
+    inbound refuses or holds, the permission classes differ, or the receiver's mode is unknown
+    (fail closed); None when it may. `who` uses this for every other session's message."""
     reason = hold_reason(sender_mode(msg), receiver_mode, env, inbound)
     if reason in ("refuse", "inbound=hold"):
-        return "hold", reason
+        return reason
     if not (isinstance(receiver_mode, str) and receiver_mode) and not _allow_bypass(env):
-        return "hold", "receiver mode unknown"
-    return ("hold", reason) if reason else ("deliver", None)
+        return "receiver mode unknown"
+    return reason
 
 
 def looks_secret(text):
