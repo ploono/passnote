@@ -22,6 +22,20 @@ class JoinTest(CliCase):
         self.assertIn("members: alice", out)
         self.assertEqual(sessions.load_meta(self.a)["name_source"], "as")
 
+    def test_join_lists_a_gone_member_apart(self):
+        self.run_cli(self.b, "join", "r", "--as", "bob")
+        self.run_cli(self.c, "join", "r", "--as", "carol")
+        sessions.update_meta(self.b, lambda meta: meta.update(pid=2 ** 31 - 2))  # no such process
+        code, out, err = self.run_cli(self.a, "join", "r", "--as", "alice")
+        self.assertEqual(code, 0, err)
+        self.assertIn("\nmembers: alice, carol (gone: bob)\n", out)
+
+    def test_join_without_gone_members_lists_them_all(self):
+        self.run_cli(self.b, "join", "r", "--as", "bob")
+        code, out, err = self.run_cli(self.a, "join", "r", "--as", "alice")
+        self.assertEqual(code, 0, err)
+        self.assertIn("\nmembers: alice, bob\n", out)
+
     def test_join_default_room_from_git_repo(self):
         repo = os.path.join(self.tmp, "my-proj")
         os.makedirs(repo)
