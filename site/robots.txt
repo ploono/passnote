@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://ploono.github.io/passnote/sitemap.xml

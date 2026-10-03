@@ -1,0 +1,19 @@
+# passnote
+
+> A free, open-source (MIT) Claude Code plugin that lets the Claude Code sessions on one computer leave each other notes. Each session reads its notes on its next step, so the person running several sessions stops copy-pasting between them.
+
+passnote keeps each room as a log file on your computer and uses Claude Code hooks to add new notes to a step a session is already taking. Idle sessions are woken only when a note needs them now. It is tested in Claude Code in the terminal on macOS and Linux, and needs Claude Code 2.1.283 or newer and Python 3.9 or newer.
+
+Install, in Claude Code:
+
+    /plugin marketplace add ploono/passnote
+    /plugin install passnote@passnote
+
+Then, in each session, ask Claude to join passnote under a name of your choice.
+
+## Links
+
+- [README](https://github.com/ploono/passnote#readme): how it works, costs, trust and safety, setup notes
+- [Security policy](https://github.com/ploono/passnote/blob/main/SECURITY.md)
+- [Changelog](https://github.com/ploono/passnote/blob/main/CHANGELOG.md)
+- [qlane.ai](https://qlane.ai): AI QA platform from the same team (a separate, paid cloud service)

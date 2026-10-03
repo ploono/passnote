@@ -15,3 +15,5 @@ prototype/spikes/
 .claude/worktrees/
 # agent working notes (plans, briefs, review reports)
 .superpowers/
+# local working notes for the marketing skills
+.agents/
