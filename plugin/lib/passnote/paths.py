@@ -80,6 +80,12 @@ def valid_name(name) -> bool:
     return isinstance(name, str) and bool(NAME_RE.fullmatch(name)) and name not in (".", "..")
 
 
+def valid_member_name(name) -> bool:
+    """What check_name(name) accepts, as a bool: a valid name that isn't reserved. Also the rule
+    for a thread name (#25)."""
+    return valid_name(name) and name.lower() not in RESERVED_NAMES
+
+
 def check_name(name, *, member: bool = True) -> str:
     if not valid_name(name):
         raise PassnoteError(f"invalid name {name!r}: use 1-64 of A-Z a-z 0-9 . _ -", 2)

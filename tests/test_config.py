@@ -26,6 +26,18 @@ class ConfigTest(HomeCase):
         self.assertIsNone(cfg["ttl_seconds"])
         self.assertEqual(cfg["inbound"], "auto")
 
+    def test_addressed_clip_default_and_env(self):
+        self.assertEqual(config.load()["clip_addressed_chars"], 1500)
+        write(os.path.join(self.home, "config.json"), {"clip_addressed_chars": 900})
+        self.assertEqual(config.load()["clip_addressed_chars"], 900)
+        os.environ["PASSNOTE_CLIP_ADDRESSED_CHARS"] = "1200"
+        self.assertEqual(config.load()["clip_addressed_chars"], 1200)
+
+    def test_full_text_max_default_and_env(self):
+        self.assertEqual(config.load()["full_text_max_chars"], 100000)
+        os.environ["PASSNOTE_FULL_TEXT_MAX_CHARS"] = "5000"
+        self.assertEqual(config.load()["full_text_max_chars"], 5000)
+
     def test_precedence_env_over_room_over_global(self):
         write(os.path.join(self.home, "config.json"), {"clip_chars": 100, "text_max_chars": 900})
         write(os.path.join(self.home, "rooms", "r1", "config.json"), {"clip_chars": 200})

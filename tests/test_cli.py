@@ -170,7 +170,8 @@ class PostTest(CliCase):
         self.assertEqual(store.read_events("r")[-1]["decision"], "WAIT")
         sessions.touch_active(self.b)
         _, out, _ = self.run_cli(self.a, "post", "--to", "bob", "--kind", "ask", stdin="again?")
-        self.assertIn('WAKE bob: SendMessage(to="bob", message="a2 alice: again?")', out)
+        self.assertIn('WAKE bob: SendMessage(to="bob", message="a2 from alice: passnote note waiting")', out)
+        self.assertNotIn("again?", out.split("\n", 1)[1])
         self.assertEqual(store.read_events("r")[-1]["decision"], "WAKE")
 
     def assert_held_wait(self, out, why):
@@ -210,7 +211,7 @@ class PostTest(CliCase):
             with self.subTest(receiver=mode):
                 set_mode(self.b, mode)
                 _, out, _ = self.run_cli(self.a, "post", "--to", "bob", "--kind", "ask", stdin="secret plan?")
-                self.assert_held_wait(out, "your permission mode is not recorded yet; no doorbell")
+                self.assert_held_wait(out, "your permission mode is not recorded yet (join and post in separate turns); no doorbell")
 
     def test_urgent_wakes_a_cold_session(self):
         _, out, _ = self.run_cli(self.a, "post", "--to", "bob", "--urgent", stdin="now")
@@ -264,7 +265,7 @@ class PostTest(CliCase):
         self.assertNotIn("QUEUED", "".join(outs))
 
     def test_errors(self):
-        self.assertEqual(self.run_cli(self.a, "post", stdin="x" * 4001)[0], 4)
+        self.assertEqual(self.run_cli(self.a, "post", stdin="x" * 100001)[0], 4)
         code, _, err = self.run_cli(self.a, "post", "--to", "carol", stdin="hi")
         self.assertEqual(code, 2)
         self.assertIn("members: alice, bob", err)
@@ -277,10 +278,37 @@ class PostTest(CliCase):
         self.assertEqual(self.run_cli(self.a, "post", "--kind", "ack", stdin="hi")[0], 2)
 
     def test_the_length_cap_comes_before_the_secret_scan(self):
-        text = "API_KEY=abcd1234abcd1234abcd " + "x" * 4000
+        text = "API_KEY=abcd1234abcd1234abcd " + "x" * 100000
         code, _, err = self.run_cli(self.a, "post", stdin=text)
         self.assertEqual(code, 4)
         self.assertNotIn("secret", err)
+
+    def test_a_long_post_is_saved_to_a_full_text_file(self):
+        code, out, _ = self.run_cli(self.a, "post", stdin="y" * 5000)
+        path = store.full_text_path("r", "a1")
+        self.assertEqual((code, out), (0, f"ok a1 (full text: {path})\n"))
+        logged = store.iter_messages("r")[-1][1]
+        self.assertEqual((logged["text"], logged["full_chars"]), ("y" * 4000, 5000))
+        with open(path, encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), "y" * 5000)
+
+    def test_a_post_at_the_cap_is_unchanged(self):
+        code, out, _ = self.run_cli(self.a, "post", stdin="y" * 4000)
+        self.assertEqual((code, out), (0, "ok a1\n"))
+        self.assertNotIn("full_chars", store.iter_messages("r")[-1][1])
+        self.assertFalse(os.path.exists(store.full_text_dir("r")))
+
+    def test_the_full_text_cap_refuses_and_writes_nothing(self):
+        self.assertEqual(self.run_cli(self.a, "post", stdin="x" * 100001)[0], 4)
+        self.assertEqual(store.iter_messages("r"), [])
+        self.assertFalse(os.path.exists(store.full_text_dir("r")))
+
+    def test_the_secret_guard_checks_the_full_text(self):
+        code, _, err = self.run_cli(self.a, "post", stdin="x" * 4500 + " API_KEY=abcd1234abcd1234abcd")
+        self.assertEqual(code, 2)
+        self.assertIn("secret", err)
+        self.assertEqual(store.iter_messages("r"), [])
+        self.assertFalse(os.path.exists(store.full_text_dir("r")))
 
     def test_mode_is_stamped_from_session_meta(self):
         set_mode(self.a, "acceptEdits")
@@ -338,6 +366,11 @@ class ReadTest(CliCase):
         self.assertEqual(len(self.run_cli(self.b, "read", "--since", "a1")[1].splitlines()), 1)
         self.assertTrue(self.run_cli(self.b, "read", "--id", "a3")[1].startswith("a3 alice→you say: "))
         self.assertEqual(self.run_cli(self.b, "read", "--id", "a2")[0], 2)
+
+    def test_read_id_points_at_the_full_text(self):
+        self.run_cli(self.a, "post", stdin="y" * 5000)
+        out = self.run_cli(self.b, "read", "--id", "a1")[1]
+        self.assertIn("y" * 4000 + f"… (+1000 chars: full text in {store.full_text_path('r', 'a1')})", out)
 
     def test_read_shows_the_readers_own_lines(self):
         self.run_cli(self.a, "post", "--to", "bob", stdin="from me")
@@ -484,6 +517,94 @@ class MainTest(CliCase):
         self.assertEqual(out.returncode, 0, out.stderr)
         read = subprocess.run([sys.executable, BIN, "read"], env=env, capture_output=True)
         self.assertIn("café".encode("utf-8"), read.stdout)
+
+
+class ThreadTest(CliCase):
+    def setUp(self):
+        super().setUp()
+        for sid, name in ((self.a, "alice"), (self.b, "bob")):
+            self.run_cli(sid, "join", "r", "--as", name)
+            set_mode(sid, "default")
+
+    def test_post_thread_is_stored_and_validated(self):
+        self.assertEqual(self.run_cli(self.a, "post", "--thread", "auth", stdin="hi")[0], 0)
+        self.assertEqual(store.iter_messages("r")[-1][1]["thread"], "auth")
+        for bad in ("a b", "all", "x" * 65, "..", ""):
+            with self.subTest(bad=bad):
+                self.assertEqual(self.run_cli(self.a, "post", "--thread", bad, stdin="hi")[0], 2)
+        self.assertEqual(len(store.iter_messages("r")), 1)  # refused before anything is written
+        self.run_cli(self.a, "post", stdin="plain")
+        self.assertNotIn("thread", store.iter_messages("r")[-1][1])
+
+    def test_a_reply_inherits_the_thread(self):
+        self.run_cli(self.a, "post", "--thread", "auth", "--to", "bob", "--kind", "ask", stdin="q")
+        self.run_cli(self.b, "post", "--re", "a1", "--kind", "ans", "--to", "alice", stdin="yes")
+        self.assertEqual(store.iter_messages("r")[-1][1]["thread"], "auth")
+        self.run_cli(self.b, "post", "--re", "a1", "--thread", "db", stdin="moved")
+        self.assertEqual(store.iter_messages("r")[-1][1]["thread"], "db")
+        self.run_cli(self.b, "post", "--re", "zz9", stdin="unknown parent")
+        self.assertNotIn("thread", store.iter_messages("r")[-1][1])
+
+    def test_a_reply_does_not_inherit_a_forged_thread(self):
+        me = store.load_members("r")[self.a]
+        store.append_message("r", {"from": "alice", "sid": self.a, "to": "all", "kind": "ask", "text": "q",
+                                   "thread": "a b"}, me["alias"])
+        self.assertEqual(self.run_cli(self.b, "post", "--re", "a1", stdin="yes")[0], 0)
+        self.assertNotIn("thread", store.iter_messages("r")[-1][1])
+
+    def test_subscribe_and_unsubscribe(self):
+        self.assertEqual(self.run_cli(self.b, "subscribe")[1], "threads in r: all\n")
+        self.assertEqual(self.run_cli(self.b, "subscribe", "auth", "db")[1], "threads in r: auth, db\n")
+        self.assertEqual(store.load_members("r")[self.b]["threads"], ["auth", "db"])
+        self.assertEqual(self.run_cli(self.b, "subscribe", "auth")[1], "threads in r: auth, db\n")
+        self.assertEqual(self.run_cli(self.b, "unsubscribe", "db")[1], "threads in r: auth\n")
+        self.assertEqual(self.run_cli(self.b, "unsubscribe", "auth")[1],
+                         "threads in r: none (you still get unthreaded lines, props, lines addressed to you and replies to your posts)\n")
+        self.assertEqual(store.load_members("r")[self.b]["threads"], [])
+        self.assertEqual(self.run_cli(self.b, "subscribe")[1],
+                         "threads in r: none (you still get unthreaded lines, props, lines addressed to you and replies to your posts)\n")
+        self.assertEqual(self.run_cli(self.b, "subscribe", "--all")[1], "threads in r: all\n")
+        self.assertNotIn("threads", store.load_members("r")[self.b])
+        code, _, err = self.run_cli(self.b, "unsubscribe", "x")
+        self.assertEqual(code, 2)
+        self.assertIn("you get every thread; subscribe to the ones you want instead", err)
+        self.assertEqual(self.run_cli(self.b, "subscribe", "--all", "auth")[0], 2)
+        self.assertEqual(self.run_cli(self.b, "subscribe", "a b")[0], 2)
+        self.assertEqual(self.run_cli(self.b, "subscribe", "all")[0], 2)
+        self.assertEqual(self.run_cli(self.c, "subscribe", "auth", "--room", "r")[0], 3)
+        self.assertEqual(self.run_cli(self.c, "unsubscribe", "auth", "--room", "r")[0], 3)
+        self.assertNotIn("threads", store.load_members("r")[self.b])
+
+    def test_read_thread_filter(self):
+        self.run_cli(self.a, "post", "--thread", "auth", stdin="one")
+        self.run_cli(self.a, "post", "--thread", "db", stdin="two")
+        self.run_cli(self.a, "post", stdin="three")
+        out = self.run_cli(self.b, "read", "--thread", "auth")[1]
+        self.assertEqual(out, "a1 alice→all say #auth: one\n")
+        self.assertEqual(self.run_cli(self.b, "read", "--thread", "db", "--last", "1")[1], "a2 alice→all say #db: two\n")
+        self.assertEqual(self.run_cli(self.b, "read", "--thread", "a b")[0], 2)
+        self.assertEqual(self.run_cli(self.b, "read", "--thread", "")[0], 2)
+
+    def test_read_shows_lines_an_unsubscribed_member_skipped(self):
+        self.run_cli(self.b, "subscribe", "auth")
+        self.run_cli(self.a, "post", "--thread", "db", stdin="two")
+        self.assertEqual(self.run_cli(self.b, "read")[1], "a1 alice→all say #db: two\n")
+
+
+class DigestCliTest(CliCase):
+    def setUp(self):
+        super().setUp()
+        self.run_cli(self.b, "join", "r", "--as", "bob")
+
+    def test_digest_on_and_off(self):
+        code, out, _ = self.run_cli(self.b, "digest", "on")
+        self.assertEqual((code, out), (0, "digest on in r: one line per thread; props, replies to your posts and --wake lines, "
+                                          "and asks, errs, naks and answers to you, arrive whole\n"))
+        self.assertIs(store.load_members("r")[self.b]["digest"], True)
+        self.assertEqual(self.run_cli(self.b, "digest", "off")[1], "digest off in r\n")
+        self.assertNotIn("digest", store.load_members("r")[self.b])
+        self.assertEqual(self.run_cli(self.b, "digest", "maybe")[0], 2)
+        self.assertEqual(self.run_cli(self.c, "digest", "on", "--room", "r")[0], 3)
 
 
 if __name__ == "__main__":

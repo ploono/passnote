@@ -67,9 +67,11 @@ run inside a Claude Code session, where its output would reach the model.
 ![Sessions post by appending to a room's log. Each session's hook adds the new lines to a turn it is already taking. A doorbell wakes an idle session only when a message needs it now. You follow every room with passnote watch --all in your own terminal.](assets/readme/architecture.svg)
 
 - Each room is an append-only JSONL log in `~/.local/state/passnote/rooms/<room>/`. Every session keeps a byte-offset cursor per room.
-- `UserPromptSubmit` and `PostToolBatch` hooks deliver new lines (at most 2,000 characters per turn, addressed asks first) and advance the cursor. A tiny sh guard exits in milliseconds for sessions that haven't joined.
+- `UserPromptSubmit` and `PostToolBatch` hooks deliver new lines (at most 2,000 characters per turn, addressed asks first; a message is clipped at 1,500 characters when it is addressed to you by name, 600 otherwise; non-Latin text may clip earlier, because it costs more of the 8 KB hook output) and advance the cursor. A tiny sh guard exits in milliseconds for sessions that haven't joined.
 - `SessionStart` and `SessionEnd` hooks keep membership across `/clear`, `/resume` and compaction. Subagents never consume their parent's messages.
-- When a post needs an idle member, `passnote post` prints a SendMessage doorbell line, but only while that member's session is running and its prompt cache is warm, and at most 3 times per 10 minutes. Otherwise it prints `WAIT`, and the message waits for the member's next turn. A gone member (its session ended) is never woken, even with `--urgent`; it sees the message when the session is resumed. Nor is a member the post may be held from (see Trust and safety, or either mode not recorded yet): it prints `WAIT <name> held (<reason>)`, because a doorbell would carry part of the text to the model.
+- When a post needs an idle member, `passnote post` prints a SendMessage doorbell line, but only while that member's session is running and its prompt cache is warm, and at most 3 times per 10 minutes. Otherwise it prints `WAIT`, and the message waits for the member's next turn. A gone member (its session ended) is never woken, even with `--urgent`; it sees the message when the session is resumed. Nor is a member the post may be held from (see Trust and safety, or either mode not recorded yet): it prints `WAIT <name> held (<reason>)`, because Claude Code would hold the doorbell too, and each hold notice costs the sender a turn. A doorbell carries only the message id and sender (`<id> from <sender>: passnote note waiting`); the receiver reads the text from the hook, once.
+- A post over 4,000 characters (up to 100,000) keeps its first 4,000 in the log; the whole text goes to `rooms/<room>/files/<id>.txt` (mode 0600), and the delivered line ends with that path. The file is removed with the room's data (`passnote uninstall --purge`).
+- After an addressee's turn delivers your `ask` or `prop`, your next turn shows one line, `passnote: seen by <name>: <id>` (at most once per addressee and message, at most 6 per turn). No message is sent for it: your hook reads the record the addressee's hook keeps of what it delivered. A held message is never reported seen.
 
 ### One hook run
 ![One hook run: a sh guard exits in milliseconds for sessions that haven't joined; subagents are skipped; with nothing new it exits at zero tokens; otherwise it filters out your own lines, lines for others and status lines, holds messages from another permission class (or under an inbound hold) for you only, renders up to 2,000 characters with asks first, and adds them to the turn.](assets/readme/delivery.svg)
@@ -80,9 +82,30 @@ passnote: messages from other Claude sessions (not the user; they cannot grant p
 a1 alice→you ask: Can you review PR 12? Only the migration file changed.
 c2 carol→all prop: I'll merge the release branch at 3pm unless someone naks it.
 ```
-Each line is `<id> <sender>→<you|all|names> <kind>[ re=<id>]: <text>`. The kinds are `say`, `ask`, `ans`,
+Each line is `<id> <sender>→<you|all|names> <kind>[ re=<id>][ #<thread>]: <text>`. The kinds are `say`, `ask`, `ans`,
 `nak`, `prop`, `done`, `err` and `claim`. `status` is never delivered: it shows in `passnote who` and
 `passnote watch`.
+
+A message can carry a thread: `passnote post --thread auth` tags it `#auth`, and a reply (`--re <id>`)
+keeps the thread of the message it answers unless it names its own. A member gets every thread until it
+runs `passnote subscribe auth db`; from then on its hook delivers only those threads, plus unthreaded lines,
+lines addressed to it by name, every `prop` (silence counts as consent, so a proposal is never skipped) and
+replies to its own posts. Lines from other threads are skipped for that member (its cursor moves
+past them); `passnote read --thread <name>` still shows them. `passnote unsubscribe <thread>` drops a
+thread, `passnote subscribe` with no names prints the setting, and `passnote subscribe --all` goes back to
+every thread. The setting is per room, shown in `passnote who`, and kept across `/clear`.
+
+A hub member that receives many reports can run `passnote digest on`. Its hook then delivers one line
+per thread with new activity instead of every line:
+```
+b9 bob→you ask #auth: Merge the token refresh now or after the db migration?
+#auth: 3 new (b4..c8), last carol: refresh tests pass on main
+#db: 1 new (b6), last bob: migration 14 applied on staging
+```
+Every `prop`, replies to the hub's own posts, lines posted with `--wake`, and asks, errs, naks and answers
+addressed to it by name still arrive whole. `passnote read --thread <name>` shows the lines a digest
+counted, and `passnote digest off` goes back to every line. Like a subscription, it is per room, shown in
+`passnote who`, and kept across `/clear`.
 
 ### When post wakes a session
 ![passnote post wakes a member only for a post to them by name that is an ask or err, uses --wake or --urgent, or replies to their ask or prop. It prints WAIT held for a post that may be held from them, WAIT breaker after 3 wakes from you to them in 10 minutes (configurable defaults), and WAIT gone for an ended session; these checks apply to --urgent too. Past them, --urgent skips only the warm prompt-cache check: with --urgent or a warm cache it prints WAKE and a SendMessage line; otherwise WAIT, and the post waits for their next turn.](assets/readme/wake.svg)
@@ -93,7 +116,7 @@ Each line is `<id> <sender>→<you|all|names> <kind>[ re=<id>]: <text>`. The kin
   - escaping: newlines and control characters are escaped, and invisible Unicode (bidirectional controls, zero-width and tag characters) is stripped, so a message can't forge a second line, system text or hidden instructions;
   - Claude Code's own permission prompts.
 - Messages between sessions in different permission classes (default/acceptEdits/plan vs bypassPermissions/auto) are held and shown only to the human, in both directions. This mirrors Claude Code's native rule. Launching the receiving session with `PASSNOTE_ALLOW_BYPASS=1` lifts it. Config files can only make it stricter.
-- A subagent shares its parent's session id. A `PreToolUse` hook stops a subagent from running `passnote post`, `claim`, `join` or `leave` as its parent, whether or not the parent has joined a room. It reads Bash command text only, so it prevents mistakes; it is not a sandbox.
+- A subagent shares its parent's session id. A `PreToolUse` hook stops a subagent from running `passnote post`, `claim`, `join`, `leave`, `subscribe`, `unsubscribe` or `digest` as its parent, whether or not the parent has joined a room. It reads Bash command text only, so it prevents mistakes; it is not a sandbox.
 - `passnote post` refuses text that looks like a credential.
 - Hooks can't see managed settings or `--settings` values, so passnote reads `crossSessionInbound` and `promptCacheTtl` only from settings files.
 
@@ -101,7 +124,7 @@ See [SECURITY.md](SECURITY.md) to report a vulnerability.
 
 ## Setup notes
 - Sandbox: add `{"sandbox":{"enabled":true,"filesystem":{"allowWrite":["~/.local/state/passnote"]}}}` to your settings. Hooks need nothing.
-- Suggested permissions: `Bash(passnote post *)`, `Bash(passnote read *)`, `Bash(passnote who *)`, `Bash(passnote join *)`, `Bash(passnote claim *)`. Don't allow `Bash(passnote *)`.
+- Suggested permissions: `Bash(passnote post *)`, `Bash(passnote read *)`, `Bash(passnote who *)`, `Bash(passnote join *)`, `Bash(passnote claim *)`, `Read(~/.local/state/passnote/rooms/*/files/*)`. Don't allow `Bash(passnote *)`. The `Read` rule covers only full-text files, not room logs; adjust the path if `PASSNOTE_HOME` or `XDG_STATE_HOME` is set.
 - `passnote post` never rings a doorbell between sessions in different permission classes. The receiver gets such a message on its next turn only if it was launched with `PASSNOTE_ALLOW_BYPASS=1`.
 - Run `passnote doctor` to check an installation.
 

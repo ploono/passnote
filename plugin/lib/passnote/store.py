@@ -4,6 +4,7 @@ from __future__ import annotations
 import errno
 import json
 import os
+import re
 import time
 
 from . import paths
@@ -16,6 +17,9 @@ MAX_SKIP = 16 * 1024 * 1024
 _SCAN_STEP = 4096
 # How many of a member's earlier session ids (one per /clear) members.json remembers.
 MAX_PREV_SIDS = 16
+# A message id as a full-text file name: an alias (rooms._alias: up to 64 letters plus a short tail)
+# and a seq. Anything else gets no path, so a forged id can never point outside the room's files/.
+FULL_TEXT_ID_RE = re.compile(r"[a-z]{1,72}[0-9]{1,18}")
 
 
 def log_path(room):
@@ -32,6 +36,18 @@ def members_path(room):
 
 def meta_path(room):
     return os.path.join(paths.room_dir(room), "meta.json")
+
+
+def full_text_dir(room):
+    return os.path.join(paths.room_dir(room), "files")
+
+
+def full_text_path(room, msg_id):
+    """Where a long message's whole text lives (#27), derived from the room and a validated id,
+    never read from the log: any member can forge a log line, so a path field could point anywhere."""
+    if not isinstance(msg_id, str) or not FULL_TEXT_ID_RE.fullmatch(msg_id):
+        return None
+    return os.path.join(full_text_dir(room), f"{msg_id}.txt")
 
 
 def room_lock(room, timeout=5.0):
@@ -76,7 +92,22 @@ def valid_message(msg) -> bool:
     if "ts" in msg and msg.get("ts") is not None:
         if isinstance(msg.get("ts"), bool) or not isinstance(msg.get("ts"), (int, float)):
             return False
+    # thread is deliberately not checked either (#25): render.thread_of counts any value that isn't
+    # a valid name (of any type) as unthreaded, so a forged one is delivered, never hidden.
+    # full_chars is deliberately not checked: a forged value must fail open, never hide the line.
+    # render_line uses it only when it is an int (not bool) larger than the text, else ignores it.
     return True
+
+
+def member_prefs(info):
+    """(threads, digest) from a member entry: threads is a frozenset of valid thread names, or None
+    for every thread (absent, or not a list of valid names: a forged value fails open); digest is
+    True only for the JSON value true."""
+    threads = info.get("threads") if isinstance(info, dict) else None
+    if not (isinstance(threads, list) and all(paths.valid_member_name(t) for t in threads)):
+        threads = None
+    digest = isinstance(info, dict) and info.get("digest") is True
+    return (frozenset(threads) if threads is not None else None), digest
 
 
 def _open_append(path):
@@ -124,7 +155,28 @@ def last_seq(path) -> int:
     return 0
 
 
-def append_message(room: str, rec: dict, alias: str) -> dict:
+def _write_full_text(path, text) -> None:
+    """Write text to path atomically: a fresh 0600 temp file in the same 0700 directory, then
+    os.replace, so a reader never sees a partial file."""
+    directory = paths.makedirs(os.path.dirname(path))
+    tmp = os.path.join(directory, f".tmp-{os.getpid()}-{os.urandom(6).hex()}")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def append_message(room: str, rec: dict, alias: str, full_text=None) -> dict:
+    """Append rec under the room lock. With full_text (#27), the whole text is written to its
+    full-text file first and rec gains full_chars; if the log append then fails, the file is
+    removed, so a delivered path always exists."""
     path = log_path(room)
     with room_lock(room):
         rec = dict(rec)
@@ -132,14 +184,29 @@ def append_message(room: str, rec: dict, alias: str) -> dict:
         rec["seq"] = last_seq(path) + 1
         rec["id"] = f"{alias}{rec['seq']}"
         rec.setdefault("ts", round(time.time(), 3))
-        data = json.dumps(rec, ensure_ascii=True, sort_keys=True).encode("ascii") + b"\n"
-        if not _ends_with_newline(path):
-            data = b"\n" + data
-        fd = _open_append(path)
+        written = None
+        if full_text is not None:
+            rec["full_chars"] = len(full_text)
+            written = full_text_path(room, rec["id"])
+            if written is None:
+                raise paths.PassnoteError(f"invalid message id {rec['id']!r} for a full-text file", 2)
+            _write_full_text(written, full_text)
         try:
-            _write_record(fd, data)
-        finally:
-            os.close(fd)
+            data = json.dumps(rec, ensure_ascii=True, sort_keys=True).encode("ascii") + b"\n"
+            if not _ends_with_newline(path):
+                data = b"\n" + data
+            fd = _open_append(path)
+            try:
+                _write_record(fd, data)
+            finally:
+                os.close(fd)
+        except BaseException:
+            if written:
+                try:
+                    os.unlink(written)
+                except FileNotFoundError:
+                    pass
+            raise
     return rec
 
 

@@ -12,6 +12,10 @@ import time
 from . import cursor, paths, sessions, store, transcript
 
 RENAME_LOCK_TIMEOUT = 1.0
+# A member's delivery preferences in its members.json entry (#25): kept on a re-join by the
+# same session, moved whole by carry_over, dropped by leave and by a takeover.
+PREF_KEYS = ("threads", "digest")
+_KEEP = object()
 
 
 def default_room(cwd):
@@ -133,15 +137,19 @@ def join(sid, room, name, root, display=None, now=None) -> dict:
         else:
             alias = _alias(name, used)
             used.add(alias)
-        earlier = members.get(sid, {}).get("prev_sids")
+        previous = members.get(sid, {})
+        earlier = previous.get("prev_sids")
         members[sid] = {
             "name": name,
             "alias": alias,
-            "joined_at": members.get(sid, {}).get("joined_at", now),
+            "joined_at": previous.get("joined_at", now),
             "root": root,
         }
         if earlier:  # a re-join after /clear: its messages from before stay its own
             members[sid]["prev_sids"] = earlier
+        for key in PREF_KEYS:  # this session's own settings (#25); a takeover starts fresh
+            if key in previous:
+                members[sid][key] = previous[key]
         meta["aliases_used"] = sorted(used)
         store.save_meta(room, meta)
         store.save_members(room, members)
@@ -169,6 +177,25 @@ def join(sid, room, name, root, display=None, now=None) -> dict:
         "warning": warning,
         "alias": alias,
     }
+
+
+def set_prefs(sid, room, threads=_KEEP, digest=_KEEP) -> dict:
+    """Set this member's delivery preferences in members.json (None or False removes the key; [] is
+    a filter that lets only unthreaded lines, props, addressed lines and replies to your posts through). Exit 3 if not a member."""
+    with store.room_lock(room):
+        members = store.load_members(room)
+        if sid not in members:
+            raise paths.PassnoteError(f"not joined to {room}; run: passnote join", 3)
+        entry = members[sid]
+        for key, value in (("threads", threads), ("digest", digest)):
+            if value is _KEEP:
+                continue
+            if value is None or value is False:
+                entry.pop(key, None)
+            else:
+                entry[key] = value
+        store.save_members(room, members)
+        return dict(entry)
 
 
 def leave(sid, room) -> bool:
@@ -251,9 +278,10 @@ def carry_over(old_sid, new_sid) -> None:
 
 def _carry_emit(old_sid, new_sid, old_meta) -> None:
     """Move the delivery hook's emit state. Overflow and ahead refs are already behind the cursor:
-    without them a /clear would lose those messages. Emitted refs are checked against the OLD
-    transcript (the new one is a different file): the unconfirmed ones are carried as overflow,
-    to be rendered again; an unreadable transcript confirms nothing."""
+    without them a /clear would lose those messages. Pending seen receipts and delivery evidence
+    come along too. Emitted refs are checked against the OLD transcript (the new one is a different
+    file): the unconfirmed ones are carried as overflow, to be rendered again; an unreadable
+    transcript confirms nothing."""
     old_emit, new_emit = sessions.load_emit(old_sid), sessions.load_emit(new_sid)
     if not any(old_emit.values()):
         return
@@ -274,7 +302,9 @@ def _carry_emit(old_sid, new_sid, old_meta) -> None:
         return out
 
     sessions.save_emit(new_sid, new_emit["emitted"], merged(new_emit["overflow"], old_emit["overflow"], unconfirmed),
-                       merged(new_emit["ahead"], old_emit["ahead"]))
+                       merged(new_emit["ahead"], old_emit["ahead"]),
+                       merged(new_emit["receipts"], old_emit["receipts"]),
+                       merged(new_emit["delivered"], old_emit["delivered"]))
 
 
 def _sweep_orphan_members(result) -> None:

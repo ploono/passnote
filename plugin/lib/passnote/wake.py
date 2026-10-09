@@ -7,7 +7,7 @@ from . import paths, render, rooms, sessions, store, trust
 
 ELIGIBLE_KINDS = ("ask", "err")
 REPLY_KINDS = ("ans", "nak", "done")
-DOORBELL_GIST_CHARS = 80
+DOORBELL_TEXT = "passnote note waiting"  # no message text (#19): the receiver reads it once, from the hook
 
 
 def parse_ttl(value):
@@ -87,15 +87,15 @@ _HELD_WORDS = {
     "permission-mode mismatch": "different permission class; only the human sees it unless the receiver allows bypass",
     "receiver mode unknown": "its permission mode is not recorded yet; it is delivered on their next turn if your "
                              "classes match",
-    "sender mode unknown": "your permission mode is not recorded yet; no doorbell",
+    "sender mode unknown": "your permission mode is not recorded yet (join and post in separate turns); no doorbell",
 }
 
 
 def held(msg, target_sid, inbound):
-    """The WAIT reason when `msg` may be held from the session target_sid, else None. A doorbell
-    carries a gist of the text, and a receiver with Claude Code's crossSessionInbound: accept would
-    show it to the model, so a post that may be held never rings one (spec §9: only the human sees
-    a held message). Decided with what the sender can know: the post's stamped mode against the
+    """The WAIT reason when `msg` may be held from the session target_sid, else None. A post that
+    may be held never rings a doorbell: Claude Code would hold it natively, each hold notice costs
+    the sender a full turn (A7), and the receiver would not see the message anyway (spec §9).
+    Decided with what the sender can know: the post's stamped mode against the
     receiver's recorded mode and the room's or global inbound. Either mode unknown means no
     doorbell (fail closed); for an unknown sender mode (a post in the same command as `join`) this
     is the wake's call only: delivery decides again once the mode is recorded.
@@ -141,8 +141,8 @@ def decide(room, target_sid, sender_sid, urgent, breaker, now=None):
 
 def doorbell_line(name, msg) -> str:
     # escape_text doubles every backslash, so no field can end in a lone "\" before the closing
-    # quote; replacing '"' keeps each field inside message="...".
-    gist = render.gist(msg.get("text", ""), DOORBELL_GIST_CHARS).replace('"', "'")
-    sender = render.escape_text(msg.get("from", "?")).replace('"', "'")
-    msg_id = render.escape_text(msg.get("id", "?")).replace('"', "'")
-    return f'WAKE {name}: SendMessage(to="{name}", message="{msg_id} {sender}: {gist}")'
+    # quote; replacing '"' keeps each field inside message="...". Head fields are clipped like
+    # rendered lines (render.FIELD_CLIP), so a forged sender can't make the line unbounded.
+    sender = render.escape_text(render._clip_field(msg.get("from", "?"))).replace('"', "'")
+    msg_id = render.escape_text(render._clip_field(msg.get("id", "?"))).replace('"', "'")
+    return f'WAKE {name}: SendMessage(to="{name}", message="{msg_id} from {sender}: {DOORBELL_TEXT}")'

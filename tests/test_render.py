@@ -1,10 +1,11 @@
 import json
+import os
 import random
 import unittest
 from unittest import mock
 
 import support  # noqa: F401 (puts plugin/lib on sys.path)
-from passnote import render
+from passnote import render, store
 
 
 def msg(**kw):
@@ -124,8 +125,113 @@ class RenderLineTest(unittest.TestCase):
         line = render.render_line(m, "bob", MEMBERS, 6)
         self.assertIn("aaaaa\\n… (+10 chars: passnote read --id a1)", line)
 
+    def test_a_long_message_points_at_its_full_text_file(self):
+        with mock.patch.dict(os.environ, {"PASSNOTE_HOME": "/nonexistent-home"}):
+            m = msg(text="z" * 4000, full_chars=5000)
+            line = render.render_line(m, "bob", MEMBERS, 600, room="r")
+            path = store.full_text_path("r", "a1")
+        self.assertTrue(line.endswith(f"z… (+4400 chars: full text in {path})"), line[-120:])
+
+    def test_unbounded_render_still_points_at_the_file(self):
+        with mock.patch.dict(os.environ, {"PASSNOTE_HOME": "/nonexistent-home"}):
+            line = render.render_line(msg(text="z" * 4000, full_chars=5000), None, MEMBERS, render.UNBOUNDED, room="r")
+        self.assertIn("z" * 4000 + "… (+1000 chars: full text in ", line)
+
+    def test_forged_full_text_fields_fall_back_to_read_id(self):
+        with mock.patch.dict(os.environ, {"PASSNOTE_HOME": "/nonexistent-home"}):
+            forged_id = render.render_line(msg(id="../x", text="z" * 700, full_chars=10 ** 9), "bob", MEMBERS, 600, room="r")
+            too_small = render.render_line(msg(text="z" * 700, full_chars=3), "bob", MEMBERS, 600, room="r")
+            no_room = render.render_line(msg(text="z" * 700, full_chars=5000), "bob", MEMBERS, 600)
+        self.assertIn("passnote read --id ../x)", forged_id)
+        self.assertNotIn("full text in", forged_id)
+        for line in (too_small, no_room):
+            self.assertIn("(+100 chars: passnote read --id a1)", line)
+
+    def test_every_forged_full_chars_shape_falls_back_to_read_id(self):
+        with mock.patch.dict(os.environ, {"PASSNOTE_HOME": "/nonexistent-home"}):
+            for forged in ("5000", True, False, -1, 0, 3, 1.5, 5000.0, float("nan"), float("inf"), [5000], {"n": 5000}):
+                with self.subTest(forged=forged):
+                    line = render.render_line(msg(text="z" * 700, full_chars=forged), "bob", MEMBERS, 600, room="r")
+                    self.assertTrue(line.endswith("z… (+100 chars: passnote read --id a1)"), line[-80:])
+            huge = render.render_line(msg(text="z" * 700, full_chars=10 ** 30), "bob", MEMBERS, 600, room="r")
+        self.assertIn(f"(+{10 ** 30 - 600} chars: full text in ", huge)
+
+    def test_a_forged_room_or_bool_full_chars_falls_back(self):
+        with mock.patch.dict(os.environ, {"PASSNOTE_HOME": "/nonexistent-home"}):
+            bad_room = render.render_line(msg(text="z" * 700, full_chars=5000), "bob", MEMBERS, 600, room="../x")
+            as_bool = render.render_line(msg(text="z", full_chars=True), "bob", MEMBERS, 600, room="r")
+        self.assertIn("(+100 chars: passnote read --id a1)", bad_room)
+        self.assertTrue(as_bool.endswith("say: z"), as_bool)
+
+
+    def test_thread_follows_kind_and_re(self):
+        self.assertEqual(render.render_line(msg(thread="auth"), "bob", MEMBERS, 600), "a1 alice→all say #auth: hi")
+        self.assertEqual(render.render_line(msg(thread="auth", kind="ans", re="b2", to=["bob"]), "bob", MEMBERS, 600),
+                         "a1 alice→you ans re=b2 #auth: hi")
+        self.assertEqual(render.thread_of(msg(thread="auth")), "auth")
+        self.assertIsNone(render.thread_of(msg()))
+
+    def test_forged_thread_values_count_as_unthreaded(self):
+        for forged in ("a b", "<x>", "all", "Claude", "x" * 65, "", "..", None, 5, ["auth"], {"auth": 1}):
+            with self.subTest(forged=forged):
+                self.assertIsNone(render.thread_of(msg(thread=forged)))
+                self.assertEqual(render.render_line(msg(thread=forged), "bob", MEMBERS, 600), "a1 alice→all say: hi")
+
 
 class BuildTest(unittest.TestCase):
+    def test_an_item_clip_overrides_the_default_clip(self):
+        it = dict(item(msg(to=["bob"], text="x" * 1400)), clip=1500)
+        ctx, emitted, overflow = render.build([it], "bob", 2000, 600)
+        self.assertIn("x" * 1400, ctx)
+        self.assertNotIn("passnote read --id", ctx)
+
+    def test_an_item_without_a_clip_uses_the_default(self):
+        ctx, _, _ = render.build([item(msg(text="x" * 1400))], "bob", 2000, 600)
+        self.assertIn("x" * 600 + "… (+800 chars: passnote read --id a1)", ctx)
+
+    def test_two_long_addressed_messages_still_share_one_budget(self):
+        items = [dict(item(msg(id=f"a{i}", seq=i, to=["bob"], text="x" * 1400)), clip=1500) for i in (1, 2)]
+        ctx, emitted, overflow = render.build(items, "bob", 2000, 600)
+        self.assertEqual([it["msg"]["id"] for it in emitted], ["a1"])
+        self.assertEqual([it["msg"]["id"] for it in overflow], ["a2"])
+        self.assertIn("1 not shown yet: a2", ctx)
+
+    def test_long_cjk_addressed_messages_keep_the_overflow_line(self):
+        items = [dict(item(msg(id=f"a{i}", seq=i, to=["bob"], kind="ask", text="漢" * 1500)), clip=1500) for i in (1, 2)]
+        ctx, emitted, overflow = render.build(items, "bob", 2000, 600)
+        self.assertLessEqual(len(json.dumps(ctx, ensure_ascii=True)) - 2, render.MAX_CONTEXT_JSON)
+        self.assertEqual(len(emitted), 1)  # the first line shrank to fit
+        self.assertIn("passnote read --id a1", ctx)
+        self.assertTrue(ctx.split("\n")[-1].startswith("… 1 not shown yet"))
+
+    def test_a_long_cyrillic_addressed_message_loses_only_what_does_not_fit(self):
+        it = dict(item(msg(to=["bob"], text="я" * 1100)), clip=1500)
+        ctx, emitted, _ = render.build([it], "bob", 2000, 600)
+        shown = ctx.count("я")
+        self.assertGreater(shown, 750)
+        self.assertLessEqual(len(json.dumps(ctx, ensure_ascii=True)) - 2, render.MAX_CONTEXT_JSON)
+        bigger = dict(it, msg=msg(to=["bob"], text="я" * 1100))
+        # one more char would not fit: the clip is the largest that does
+        line = render.render_line(bigger["msg"], "bob", MEMBERS, shown + 1)
+        self.assertGreater(len(json.dumps(render.HEADER + "\n" + line)) - 2, render.MAX_CONTEXT_JSON)
+
+    def test_build_points_a_long_message_at_its_file_within_the_cap(self):
+        with mock.patch.dict(os.environ, {"PASSNOTE_HOME": "/nonexistent-home"}):
+            path = store.full_text_path("r", "a1")
+            items = [dict(item(msg(id=f"a{i}", seq=i, to=["bob"], kind="ask", text="漢" * 4000, full_chars=10 ** 12)),
+                          clip=1500) for i in (1, 2)]
+            ctx, emitted, overflow = render.build(items, "bob", 2000, 600)
+        self.assertLessEqual(len(json.dumps(ctx, ensure_ascii=True)) - 2, render.MAX_CONTEXT_JSON)
+        self.assertIn(f"chars: full text in {path})", ctx)
+        self.assertEqual(emitted[0]["line"], ctx.split("\n")[1])
+        self.assertTrue(ctx.split("\n")[-1].startswith("… 1 not shown yet: a2"))
+
+    def test_addressed_by_name(self):
+        self.assertTrue(render.addressed_by_name(msg(to=["bob", "carol"]), "bob"))
+        self.assertFalse(render.addressed_by_name(msg(to="all"), "bob"))
+        self.assertFalse(render.addressed_by_name(msg(to=["carol"]), "bob"))
+        self.assertFalse(render.addressed_by_name(msg(to=["bob"]), None))
+
     def test_priority_and_overflow(self):
         items = [item(msg(id=f"a{i}", seq=i, text="x" * 500)) for i in range(1, 6)]
         items.append(item(msg(id="a9", seq=9, to=["bob"], kind="ask", text="urgent?")))
@@ -352,6 +458,177 @@ class BuildTest(unittest.TestCase):
                 self.assertLess(len(json.dumps(out, ensure_ascii=True)), 8192)
                 if overflow:
                     self.assertIn("not shown yet", context)
+
+
+
+class ReceiptLineTest(unittest.TestCase):
+    def test_format_groups_by_name(self):
+        self.assertEqual(render.receipt_line([("bob", "a1"), ("bob", "a3"), ("carol", "a1")]),
+                         "passnote: seen by bob: a1, a3; by carol: a1")
+        self.assertIsNone(render.receipt_line([]))
+
+    def test_invalid_names_and_ids_are_dropped_and_the_line_is_bounded(self):
+        pairs = [("böb", "a1"), ("bob", "../x"), ("bob", "a2")] + [("n" * 64, f"a{i}") for i in range(50)]
+        line = render.receipt_line(pairs)
+        self.assertNotIn("ö", line)
+        self.assertNotIn("../x", line)
+        self.assertTrue(line.isascii())
+        self.assertLessEqual(len(line), render.RECEIPT_MAX_CHARS)
+
+    def test_parts_name_the_pairs_the_line_shows(self):
+        long_ids = [("bob", "a" * 72 + str(10 ** 17 + i)) for i in range(6)]  # one group over the cap
+        line, shown = render.receipt_parts(long_ids + [("böb", "a1")])
+        self.assertTrue(line.startswith("passnote: seen by bob: "))
+        self.assertLessEqual(len(line), render.RECEIPT_MAX_CHARS)
+        self.assertTrue(shown)  # a group too long for the line still shows its first pairs
+        self.assertEqual(shown, long_ids[:len(shown)])
+        self.assertLess(len(shown), len(long_ids))
+        self.assertTrue(all(msg_id in line for _, msg_id in shown))
+        self.assertEqual(render.receipt_line(shown), line)
+        self.assertEqual(render.receipt_parts([("böb", "a1")]), (None, []))
+
+    def test_build_with_only_a_tail(self):
+        self.assertEqual(render.build([], "bob", 2000, 600, tail="passnote: seen by bob: a1"),
+                         ("passnote: seen by bob: a1", [], []))
+
+    def test_tail_is_counted_inside_the_context_cap(self):
+        items = [item(msg(id=f"a{i}", seq=i, to=["bob"], kind="ask", text="漢" * 600)) for i in range(1, 40)]
+        tail = render.receipt_line([("n" * 64, f"a{i}") for i in range(1, 7)])
+        ctx, emitted, overflow = render.build(items, "bob", 2000, 600, tail=tail)
+        self.assertTrue(ctx.endswith("\n" + tail))
+        self.assertLessEqual(len(json.dumps(ctx, ensure_ascii=True)) - 2, render.MAX_CONTEXT_JSON)
+        self.assertTrue(overflow)
+        self.assertIn("not shown yet", ctx.split("\n")[-2])
+
+    def test_tail_with_one_huge_item_stays_under_the_cap(self):
+        tail = render.receipt_line([("n" * 64, "a" * 72 + str(10 ** 17 + i)) for i in range(6)])
+        items = [item(msg(id="a1", to=["bob"], kind="ask", text="\u2028" * 5000))]
+        ctx, emitted, overflow = render.build(items, "bob", 10 ** 6, 10 ** 6, tail=tail)
+        self.assertTrue(ctx.endswith("\n" + tail))
+        self.assertEqual(len(emitted), 1)
+        self.assertLessEqual(len(json.dumps(ctx, ensure_ascii=True)) - 2, render.MAX_CONTEXT_JSON)
+
+    def test_tail_counts_against_the_character_budget(self):
+        items = [item(msg(id=f"a{i}", seq=i, text="x" * 90)) for i in range(1, 4)]
+        tail = "passnote: seen by bob: a1"
+        _, emitted, _ = render.build(items, "bob", len(render.HEADER) + 2 * 109, 600)
+        self.assertEqual(len(emitted), 2)
+        _, emitted, overflow = render.build(items, "bob", len(render.HEADER) + 2 * 109, 600, tail=tail)
+        self.assertEqual((len(emitted), len(overflow)), (1, 2))
+
+
+class DigestTest(unittest.TestCase):
+    def test_whole(self):
+        for kind in ("ask", "err", "prop", "nak", "ans"):
+            self.assertTrue(render.whole(msg(kind=kind, to=["bob"]), "bob"), kind)
+        self.assertTrue(render.whole(msg(kind="say", to=["bob"], wake=True), "bob"))
+        self.assertTrue(render.whole(msg(kind="prop"), "bob"))  # a broadcast prop: silence is consent
+        self.assertTrue(render.whole(msg(kind="prop", to=["carol"]), "bob"))
+        for m in (msg(kind="done", to=["bob"]), msg(kind="say", to=["bob"]), msg(kind="claim", to=["bob"]),
+                  msg(kind="ask"), msg(kind="ans", to=["carol"]), msg(kind="nak")):
+            self.assertFalse(render.whole(m, "bob"), m)
+
+    def test_replies_to_my_own_posts_arrive_whole(self):
+        self.assertTrue(render.whole(msg(kind="nak", re="b3"), "bob", alias="b"))
+        self.assertTrue(render.whole(msg(kind="ans", re="b12"), "bob", alias="b"))
+        for re_id, alias in (("bb3", "b"), ("b", "b"), ("b3x", "b"), ("c3", "b"), ("b3", None), ("b3", ""), (3, "b")):
+            self.assertFalse(render.whole(msg(kind="ans", re=re_id), "bob", alias=alias), (re_id, alias))
+
+    def test_replies_to(self):
+        self.assertTrue(render.replies_to(msg(re="ab17"), "ab"))
+        self.assertFalse(render.replies_to(msg(re="ab17"), "a"))
+        self.assertFalse(render.replies_to(msg(), "a"))
+        self.assertFalse(render.replies_to(msg(re="a1"), {"x": 1}))
+
+    def test_digest_line_format(self):
+        group = [item(msg(id="a3", seq=3, thread="auth", text="first")),
+                 item(msg(id="b5", seq=5, sid="S-B", **{"from": "bob"}, thread="auth", text="plan ready for gate"))]
+        self.assertEqual(render.digest_line(group, False), "#auth: 2 new (a3..b5), last bob: plan ready for gate")
+        self.assertEqual(render.digest_line(group[:1], False), "#auth: 1 new (a3), last alice: first")
+        self.assertEqual(render.digest_line(group[:1], True), "[r] #auth: 1 new (a3), last alice: first")
+        self.assertTrue(render.digest_line([item(msg(text="x" * 200))], False).startswith("unthreaded: 1 new (a1), last alice: "))
+        self.assertLessEqual(len(render.digest_line([item(msg(text="x" * 200))], False).split(": ", 2)[2]), 60)
+        self.assertEqual(render.digest_line([item(msg(text="a\nb"))], False), "unthreaded: 1 new (a1), last alice: a\\nb")
+
+    def test_build_digests_and_keeps_whole_items_first(self):
+        items = [dict(item(msg(id="a1", seq=1, thread="auth", text="s1")), digest=True),
+                 dict(item(msg(id="a2", seq=2, thread="auth", text="s2")), digest=True),
+                 item(msg(id="a3", seq=3, kind="ask", to=["bob"], text="q?"))]
+        ctx, emitted, overflow = render.build(items, "bob", 2000, 600)
+        self.assertEqual(ctx.split("\n")[1:], ["a3 alice→you ask: q?", "#auth: 2 new (a1..a2), last alice: s2"])
+        lines = {it["msg"]["id"]: it["line"] for it in emitted}
+        self.assertEqual(lines["a1"], lines["a2"])
+        self.assertEqual(lines["a1"], "#auth: 2 new (a1..a2), last alice: s2")
+        self.assertEqual(overflow, [])
+
+    def test_a_group_is_in_seq_order_whatever_the_priority(self):
+        """An addressed done ranks ahead of an older broadcast; the span and "last" still follow seq."""
+        items = [dict(item(msg(id="a1", seq=1, thread="auth", text="older")), digest=True),
+                 dict(item(msg(id="a2", seq=2, thread="auth", kind="done", to=["bob"], text="newer")), digest=True)]
+        ctx, _, _ = render.build(items, "bob", 2000, 600)
+        self.assertEqual(ctx.split("\n")[1:], ["#auth: 2 new (a1..a2), last alice: newer"])
+
+    def test_groups_order_redelivered_first_then_earliest_seq(self):
+        items = [dict(item(msg(id="a1", seq=1, thread="db", text="d1")), digest=True),
+                 dict(item(msg(id="a2", seq=2, text="u2")), digest=True),
+                 dict(item(msg(id="a3", seq=3, thread="auth", text="x3")), digest=True),
+                 dict(item(msg(id="a4", seq=4, thread="auth", text="x4"), redeliver=True), digest=True)]
+        ctx, _, _ = render.build(items, "bob", 2000, 600)
+        self.assertEqual(ctx.split("\n")[1:], ["#auth: 2 new (a3..a4), last alice: x4",
+                                               "#db: 1 new (a1), last alice: d1",
+                                               "unthreaded: 1 new (a2), last alice: u2"])
+
+    def test_groups_are_per_room(self):
+        items = [dict(item(msg(id="a1", seq=1, thread="auth", text="in r")), digest=True),
+                 dict(item(msg(id="a1", seq=1, thread="auth", text="in s"), room="s"), digest=True)]
+        ctx, emitted, _ = render.build(items, "bob", 2000, 600)
+        self.assertEqual(ctx.split("\n")[1:], ["[r] #auth: 1 new (a1), last alice: in r",
+                                               "[s] #auth: 1 new (a1), last alice: in s"])
+        self.assertEqual(len(emitted), 2)
+
+    def test_digest_lines_are_capped(self):
+        items = [dict(item(msg(id=f"a{i}", seq=i, thread=f"t{i}", text="x")), digest=True) for i in range(1, 11)]
+        ctx, emitted, overflow = render.build(items, "bob", 2000, 600)
+        self.assertEqual(sum(1 for line in ctx.split("\n") if line.startswith("#t")), render.DIGEST_MAX_LINES)
+        self.assertEqual([it["msg"]["id"] for it in overflow], ["a9", "a10"])
+        self.assertIn("not shown yet", ctx.split("\n")[-1])
+
+    def test_a_group_over_the_budget_overflows_whole(self):
+        items = [dict(item(msg(id="a1", seq=1, thread="auth", text="x")), digest=True),
+                 dict(item(msg(id="a2", seq=2, thread="db", text="y")), digest=True),
+                 dict(item(msg(id="a3", seq=3, thread="db", text="z")), digest=True)]
+        first = len("#auth: 1 new (a1), last alice: x")
+        _, emitted, overflow = render.build(items, "bob", len(render.HEADER) + 1 + first + 5, 600)
+        self.assertEqual([it["msg"]["id"] for it in emitted], ["a1"])
+        self.assertEqual([it["msg"]["id"] for it in overflow], ["a2", "a3"])
+
+    def test_the_first_group_ignores_the_character_budget(self):
+        """Like the first whole line: a fire always makes progress, even with a tiny budget and forged fields."""
+        items = [dict(item(msg(id="\u2028" * 64, seq=1, thread="t" * 64, text="x"), room="r" * 64), digest=True),
+                 dict(item(msg(id="a2", seq=2, text="y"), room="s"), digest=True)]
+        ctx, emitted, overflow = render.build(items, "bob", 10, 10)
+        self.assertEqual([it["seq"] for it in (e["msg"] for e in emitted)], [1])
+        self.assertEqual(len(overflow), 1)
+        self.assertLessEqual(len(json.dumps(ctx, ensure_ascii=True)) - 2, render.MAX_CONTEXT_JSON)
+
+    def test_forged_digest_input_stays_under_the_cap(self):
+        items = [dict(item(msg(id="x" * 64 + str(i), seq=i, thread="t" * 64, text="漢" * 4000, **{"from": "f" * 500})),
+                      digest=True, room=f"room{i}") for i in range(1, 30)]
+        ctx, _, _ = render.build(items, "bob", 2000, 600)
+        self.assertLessEqual(len(json.dumps(ctx, ensure_ascii=True)) - 2, render.MAX_CONTEXT_JSON)
+        for line in ctx.split("\n"):
+            self.assertNotIn("\n", line)
+
+    def test_forged_escaping_fields_stay_under_the_cap_with_a_tail(self):
+        tail = render.receipt_line([("n" * 64, "a" * 72 + str(10 ** 17 + i)) for i in range(6)])
+        items = [dict(item(msg(id="\u2028" * 80 + str(i), seq=i, thread=f"t{i}", text="\u2028" * 4000,
+                               **{"from": "\u2028" * 80}), room="\u2028" * 80 + str(i)), digest=True)
+                 for i in range(1, 30)]
+        ctx, emitted, overflow = render.build(items, "bob", 10 ** 6, 10 ** 6, tail=tail)
+        self.assertLessEqual(len(json.dumps(ctx, ensure_ascii=True)) - 2, render.MAX_CONTEXT_JSON)
+        self.assertTrue(ctx.endswith("\n" + tail))
+        self.assertGreaterEqual(len(emitted), 1)
+        self.assertIn("not shown yet", ctx)
 
 
 if __name__ == "__main__":

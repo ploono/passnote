@@ -177,6 +177,52 @@ class RoomsTest(HomeCase):
         rooms.join(new, "r", "alice", "/root")
         self.assertEqual(store.load_members("r")[new]["prev_sids"], [self.a])
 
+    def test_rejoin_keeps_prefs_and_takeover_does_not(self):
+        rooms.join(self.b, "r", "bob", "/root")
+        entry = rooms.set_prefs(self.b, "r", threads=["auth"], digest=True)
+        self.assertEqual((entry["threads"], entry["digest"]), (["auth"], True))
+        rooms.join(self.b, "r", "bob", "/root")
+        kept = store.load_members("r")[self.b]
+        self.assertEqual((kept["threads"], kept["digest"]), (["auth"], True))
+        proc = subprocess.Popen([sys.executable, "-c", "pass"])
+        proc.wait()
+        sessions.write_by_pid(proc.pid, {"sid": self.b, "pid_started_at": None})
+        newcomer = new_sid()
+        rooms.join(newcomer, "r", "bob", "/root")
+        self.assertNotIn(self.b, store.load_members("r"))
+        entry = store.load_members("r")[newcomer]
+        self.assertNotIn("threads", entry)
+        self.assertNotIn("digest", entry)
+
+    def test_set_prefs_keeps_removes_and_needs_membership(self):
+        rooms.join(self.b, "r", "bob", "/root")
+        rooms.set_prefs(self.b, "r", threads=["auth"], digest=True)
+        rooms.set_prefs(self.b, "r", threads=[])  # [] is a filter (only unthreaded and addressed lines)
+        self.assertEqual(store.load_members("r")[self.b]["threads"], [])
+        self.assertTrue(store.load_members("r")[self.b]["digest"])
+        rooms.set_prefs(self.b, "r", threads=None, digest=False)
+        self.assertNotIn("threads", store.load_members("r")[self.b])
+        self.assertNotIn("digest", store.load_members("r")[self.b])
+        with self.assertRaises(paths.PassnoteError) as ctx:
+            rooms.set_prefs(self.a, "r", threads=["auth"])
+        self.assertEqual(ctx.exception.code, 3)
+
+    def test_subscription_survives_clear_and_rejoin(self):
+        rooms.join(self.b, "r", "bob", "/root")
+        rooms.set_prefs(self.b, "r", threads=["auth"])
+        new = new_sid()
+        rooms.carry_over(self.b, new)
+        self.assertEqual(store.load_members("r")[new]["threads"], ["auth"])
+        rooms.join(new, "r", "bob", "/root")  # join rebuilds the entry: it must keep the setting
+        self.assertEqual(store.load_members("r")[new]["threads"], ["auth"])
+
+    def test_digest_survives_clear(self):
+        rooms.join(self.b, "r", "bob", "/root")
+        rooms.set_prefs(self.b, "r", digest=True)
+        new = new_sid()
+        rooms.carry_over(self.b, new)
+        self.assertIs(store.load_members("r")[new]["digest"], True)
+
     def test_carry_over_creates_the_new_session_dir_before_moving_membership(self):
         rooms.join(self.a, "r", "alice", "/root")
         new = new_sid()

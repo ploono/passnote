@@ -10,6 +10,12 @@ def _brief(msg):
     return {key: msg.get(key) for key in _BRIEF_KEYS}
 
 
+def passed(seq, cur) -> bool:
+    """Whether a member's cursor `cur` has passed the message with `seq` (the "seen" rule)."""
+    s = cur.get("seq") if isinstance(cur, dict) else None
+    return isinstance(s, int) and not isinstance(s, bool) and isinstance(seq, int) and s >= seq
+
+
 def fold(messages, members, cursors, held=None) -> dict:
     """`held` is an optional set of (message id, addressee sid): a prop held back from its addressee
     (a hold event) was not seen by them, whatever their cursor says."""
@@ -55,8 +61,7 @@ def fold(messages, members, cursors, held=None) -> dict:
             seen, unseen = [], []
             for name in msg["to"]:
                 addressee = sid_of.get(name)
-                cur = cursors.get(addressee) or {}
-                passed = cur.get("seq", 0) >= msg.get("seq", 0) and (msg.get("id"), addressee) not in held
-                (seen if passed else unseen).append(name)
+                done = passed(msg.get("seq", 0), cursors.get(addressee)) and (msg.get("id"), addressee) not in held
+                (seen if done else unseen).append(name)
             props.append(dict(_brief(msg), seen=seen, unseen=unseen))
     return {"unanswered": unanswered, "claims": claims, "status": status, "props": props}

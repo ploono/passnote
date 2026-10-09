@@ -34,6 +34,21 @@ class LifecycleTest(HomeCase):
         post(self.a, "r", "after clear")
         self.assertIn("after clear", hook.main("PostToolBatch", hook_input(new), self.env(new)))
 
+    def test_pending_receipts_survive_clear(self):
+        # alice (self.a) has a pending receipt; a /clear carries it to the new sid
+        post(self.a, "r", "q", kind="ask", to=["bob"])
+        hook.main("PostToolBatch", hook_input(self.a), self.env(self.a))
+        new = new_sid()
+        rooms.carry_over(self.a, new)
+        self.assertEqual([entry["id"] for entry in sessions.load_emit(new)["receipts"]], ["a1"])
+
+    def test_delivery_evidence_survives_clear(self):
+        post(self.a, "r", "q", kind="ask", to=["bob"])
+        hook.main("PostToolBatch", hook_input(self.b), self.env(self.b))
+        new = new_sid()
+        rooms.carry_over(self.b, new)
+        self.assertEqual([entry["id"] for entry in sessions.load_emit(new)["delivered"]], ["a1"])
+
     def test_reminder_lists_at_most_five_rooms(self):
         for i in range(2, 9):
             join(self.b, f"r{i}", "bob")
@@ -223,12 +238,14 @@ class LifecycleTest(HomeCase):
             "echo `passnote post`", "x\npassnote post", "\\passnote post", "(passnote post)",
             'passnote "post"', "passnote 'claim' x", '"passnote" post', "'passnote' join",
             "passnote -- post", "passnote  --  claim x", "passnote -- 'join'", "echo hi | passnote -- post",
+            "passnote subscribe auth", "passnote unsubscribe auth", "passnote digest on", "passnote subscribe --all",
         ]
         allowed = [
             "passnote read", "passnote who", "passnote watch", "passnote rooms", "passnote doctor",
             "mypassnote post", "passnote-post", "echo passnote", "passnote", "passnote posting",
             "passnote post-mortem", "passnote.post", "passnote\npost", "passnote  'read'", "ls /x/passnote/post", "", "git status",
             "passnote -- read", "passnote --version", "passnote --post",
+            "passnote subscribers", "passnote digest-x", "passnote subscribe-x",
         ]
         for command in denied:
             with self.subTest(deny=command):

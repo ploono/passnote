@@ -223,7 +223,7 @@ class HeadlessTest(unittest.TestCase):
         receiver = self.stream_session("receiver", [
             "--name", rx, "--settings", json.dumps({"crossSessionInbound": "accept"}),
             "--append-system-prompt", "When a message from another Claude session arrives, reply only with GOT: "
-            "followed by that message's text. Never use tools for it."])
+            "followed by any codeword passnote delivered to you. Never use tools for it."])
         receiver.send(f'Run exactly this shell command and nothing else, then stop: "{BIN}" join it --as {rx}')
         self.assertTrue(receiver.wait_results(1, SESSION_TIMEOUT), "the receiver never finished its first turn")
 
@@ -231,16 +231,34 @@ class HeadlessTest(unittest.TestCase):
         self.keep("only_to_receiver.py", ONLY_TO_RECEIVER)
         sender_settings = {"hooks": {"PreToolUse": [{"matcher": "SendMessage", "hooks": [
             {"type": "command", "command": f"python3 {shlex.quote(guard)} {rx}", "timeout": 10}]}]}}
+        # Alice joins in one turn and posts in a later one: her permission mode is recorded by the
+        # UserPromptSubmit hook, and `post` holds (no doorbell) while the sender's mode is unknown.
+        alice, _, _ = self.claude(f'Run exactly this shell command and nothing else, then stop: "{BIN}" join it --as alice')
         _, _, out = self.claude(
-            f'Run exactly this shell command and nothing else: "{BIN}" join it --as alice '
-            f"&& printf 'the codeword is MARIGOLD' | \"{BIN}\" post --kind ask --to {rx}\n"
+            f'Run exactly this shell command and nothing else: printf \'the codeword is MARIGOLD\' | "{BIN}" post --kind ask --to {rx}\n'
             "If its output has a line starting with WAKE, make exactly the SendMessage call that line shows. Then stop.",
-            tools="Bash,SendMessage", extra=["--settings", json.dumps(sender_settings)], stream=True)
+            resume=alice, tools="Bash,SendMessage", extra=["--settings", json.dumps(sender_settings)], stream=True)
 
         wakes = [ev for ev in self.room_file("it", "events.jsonl") if ev.get("type") == "wake"]
         self.assertEqual([(ev["to"], ev["decision"]) for ev in wakes], [(rx, "WAKE")], self.errors())
         self.assertIn('"name":"SendMessage"', out.replace(" ", ""), "the sender never called SendMessage")
         self.assertTrue(receiver.wait_results(2, DOORBELL_TIMEOUT), "the doorbell did not wake the receiver")
+        # The doorbell carries no text (#19), so the text reaches the receiver only through the hook:
+        # the proof is a UserPromptSubmit attachment in its transcript, after the doorbell.
+        with open(os.path.join(self.home, "rooms", "it", "members.json")) as fh:
+            receiver_sid = next((sid for sid, info in json.load(fh).items() if info.get("name") == rx), None)
+        self.assertTrue(receiver_sid, "receiver not in members.json")
+        with open(os.path.join(self.home, "sessions", receiver_sid, "meta.json")) as fh:
+            transcript = json.load(fh).get("transcript_path")
+        self.assertTrue(transcript and os.path.isfile(transcript), "the receiver's transcript path was not recorded")
+        with open(transcript) as fh:
+            records = [json.loads(line) for line in fh if line.strip().startswith("{")]
+        bell = [i for i, rec in enumerate(records) if "from alice: passnote note waiting" in json.dumps(rec)]
+        self.assertTrue(bell, "no doorbell in the receiver's transcript")
+        delivered = [rec for rec in records[bell[0]:] if (rec.get("attachment") or {}).get("type") == "hook_additional_context"
+                     and rec["attachment"].get("hookEvent") == "UserPromptSubmit"
+                     and "MARIGOLD" in json.dumps(rec["attachment"].get("content"))]
+        self.assertTrue(delivered, "the hook did not deliver MARIGOLD on the doorbell-woken turn")
         self.assertIn("MARIGOLD", receiver.assistant_text(after_results=1), self.errors())
 
     def test_a_subagent_cannot_post_as_its_joined_parent(self):

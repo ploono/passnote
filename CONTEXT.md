@@ -86,6 +86,17 @@ _Avoid_: lock, reservation
 **Status**:
 A message describing what the sender is doing right now. Members see it on request, and it is never delivered to them.
 
+**Full-text file**:
+The file holding the whole text of a message too long for the log. Delivery shows its path.
+_Avoid_: attachment, spill
+
+**Thread**:
+A name a message can carry, so members can follow some lines of a room and not others.
+_Avoid_: topic, channel, sub-room
+
+**Subscription**:
+The threads a member chose to receive. Without one, a member gets every thread; with one, it still gets unthreaded lines, proposals, replies to its own messages and lines addressed to it.
+
 ## Delivery and trust
 
 **Delivery**:
@@ -93,7 +104,7 @@ A message reaching a member's context during a turn that member is taking anyway
 _Avoid_: injection, push, notification
 
 **Doorbell**:
-A short SendMessage that makes an idle addressee start a turn, so a message gets delivered now.
+A short SendMessage that makes an idle addressee start a turn, so a message gets delivered now. It carries the message id and sender, never the text.
 _Avoid_: ping, nudge
 
 **Wake**:
@@ -110,6 +121,14 @@ _Avoid_: backlog, queue, carry-over
 **Unanswered**:
 An ask (or err) that at least one of its addressees hasn't replied to yet. This is independent of whether it was delivered.
 _Avoid_: pending, open, outstanding
+
+**Digest**:
+A delivery mode in which a member gets one line per thread with new activity instead of every line. Proposals, replies to its own messages, lines posted with `--wake`, and asks, errs, naks and answers addressed to it still arrive whole.
+_Avoid_: summary mode
+
+**Seen receipt**:
+A line on a sender's next turn saying an addressee's turn has delivered the sender's ask or proposal. Worked out from the record the addressee's hook keeps of what it delivered; the addressee sends nothing.
+_Avoid_: ack, read receipt
 
 **Permission class**:
 Whether a session asks its human before acting (prompting) or doesn't (non-prompting). It is derived from the session's permission mode.

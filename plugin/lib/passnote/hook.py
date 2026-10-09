@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import sys
@@ -17,6 +18,15 @@ READ_NO_PROGRESS = "a full read window held no new valid line; delivery from thi
 OVERFLOW_CAP = 64
 # Addressed asks a room may take ahead of its full share per fire (see _Fire).
 AHEAD_PER_ROOM = 4
+# Seen receipts (#28): the sender's own addressed asks and props, reported once an addressee's turn
+# has delivered them. Bounded: messages pending, names per message, age, and pairs shown per fire.
+RECEIPT_KINDS = ("ask", "prop")
+MAX_PENDING_RECEIPTS = 16
+MAX_RECEIPT_ADDRESSEES = 4
+RECEIPT_MAX_AGE = 86400  # seconds
+RECEIPTS_PER_FIRE = 6
+# Delivery evidence a session keeps: the addressed asks and props it delivered to its model.
+MAX_DELIVERED = 64
 
 
 def main(event, stdin_text, env=None) -> str:
@@ -157,7 +167,7 @@ class _Fire:
     (spec §7 order). Their refs stay in the emit state's "ahead" list until the cursor passes
     them, and the cursor pass skips them: each is delivered once."""
 
-    def __init__(self, sid, meta, env, ahead=()):
+    def __init__(self, sid, meta, env, ahead=(), receipts=()):
         self.sid = sid
         self.me = meta.get("name")
         self.rooms = meta["rooms"]
@@ -165,7 +175,7 @@ class _Fire:
         self.env = env
         self.settings_inbound = claude_settings.inbound(env.get("CLAUDE_PROJECT_DIR"))
         self.room_cap = max(1, OVERFLOW_CAP // max(1, len(self.rooms)))
-        self.cache, self.taken = {}, {}
+        self.cache, self.prefs_cache, self.taken = {}, {}, {}
         self.items, self.held, self.seen = [], [], set()
         self.unread = []  # carried overflow refs beyond what one fire re-reads
         self.ahead = {}  # room -> refs taken ahead of the cursor, still ahead of it
@@ -174,6 +184,24 @@ class _Fire:
                     and _int(ref.get("seq")) and isinstance(ref.get("id"), str)):
                 self.ahead.setdefault(ref["room"], []).append(ref)
         self.ahead_keys = {(ref["room"], ref["id"], ref["seq"]) for refs in self.ahead.values() for ref in refs}
+        # This session's addressed asks and props waiting to be reported seen (see _receipts).
+        self.pending = [entry for entry in receipts if _valid_receipt(entry, self.rooms)][-MAX_PENDING_RECEIPTS:]
+
+    def track(self, room, msg):
+        """The sender's own addressed ask or prop, passed by its own cursor: wait to report it seen."""
+        to = msg.get("to")
+        if msg.get("kind") not in RECEIPT_KINDS or not isinstance(to, list):
+            return
+        me = self.room(room)[3]
+        names = [name for name in dict.fromkeys(to) if name != me and render.receipt_pair_ok(name, msg["id"])]
+        names = names[:MAX_RECEIPT_ADDRESSEES]
+        if names and not any(entry["room"] == room and entry["id"] == msg["id"] for entry in self.pending):
+            now, ts = time.time(), msg.get("ts")
+            # A log line's ts is only a hint (any member can write one): never later than now.
+            ts = min(ts, now) if _finite(ts) else now
+            self.pending.append({"room": room, "id": msg["id"], "seq": msg["seq"], "ts": ts,
+                                 "mode": msg.get("mode"), "to": names})
+            self.pending = self.pending[-MAX_PENDING_RECEIPTS:]
 
     def take_ahead(self, room, msg, ref):
         self.deliver(room, msg, ref)
@@ -198,14 +226,48 @@ class _Fire:
     def full(self, room) -> bool:
         return self.taken.get(room, 0) >= self.room_cap
 
+    def prefs(self, room):
+        """(threads, digest) for this member in a room, from the members.json this fire already read."""
+        if room not in self.prefs_cache:
+            self.prefs_cache[room] = store.member_prefs(self.room(room)[0].get(self.sid))
+        return self.prefs_cache[room]
+
     def verdict(self, room, msg):
         _, _, inbound, me = self.room(room)
-        return trust.visibility(msg, self.sid, me, self.receiver_mode, inbound, self.env)
+        action, reason = trust.visibility(msg, self.sid, me, self.receiver_mode, inbound, self.env)
+        if action == "deliver":
+            threads, _ = self.prefs(room)
+            thread = render.thread_of(msg)
+            if (threads is not None and thread is not None and thread not in threads
+                    and not self.always_arrives(room, msg, me)):
+                # An unsubscribed thread (#25): done for this member. The cursor passes it, it is
+                # never emitted, so it is never delivery evidence; `read --thread` still shows it.
+                return "skip", None
+        return action, reason
+
+    def always_arrives(self, room, msg, me) -> bool:
+        """Lines no subscription filters out (#25): those addressed to me by name; every prop, since
+        silence counts as consent once the cursor passes it; and replies to my own posts (a broadcast
+        reply inherits its parent's thread). My alias comes from the members.json this fire already
+        read. A forged `re` only delivers more."""
+        if msg.get("kind") == "prop" or render.addressed_by_name(msg, me):
+            return True
+        return render.replies_to(msg, self.alias(room))
+
+    def alias(self, room):
+        """My alias in a room, from the members.json this fire already read (None if not listed)."""
+        info = self.room(room)[0].get(self.sid)
+        return info.get("alias") if isinstance(info, dict) else None
 
     def deliver(self, room, msg, ref, redeliver=False):
+        """Queue msg for rendering. In digest mode (#26) it is marked to fold into its thread's digest
+        line unless render.whole says it arrives whole. This runs for redelivered and carried items
+        too, so the mark always follows the current setting."""
         members, display, _, me = self.room(room)
+        _, digest_on = self.prefs(room)
         self.items.append({"room": room, "display": display, "msg": msg, "members": members, "me": me,
-                           "ref": ref, "redeliver": redeliver})
+                           "ref": ref, "redeliver": redeliver,
+                           "digest": digest_on and not render.whole(msg, me, self.alias(room))})
         self.seen.add((room, msg["id"], msg["seq"]))
         self.taken[room] = self.taken.get(room, 0) + 1
 
@@ -215,6 +277,102 @@ class _Fire:
         self.held.append({"room": room, "display": display, "msg": msg, "reason": reason, "members": members})
         self.seen.add((room, msg["id"], msg["seq"]))
         store.append_event(room, {"type": "hold", "reason": reason, "id": msg["id"], "to_sid": self.sid})
+
+
+def _finite(value) -> bool:
+    """A real, finite number: a NaN or infinite ts would never age out, and an int too large for a
+    float (JSON allows one) would raise in the arithmetic."""
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
+def _valid_receipt(entry, rooms_joined) -> bool:
+    """A pending receipt as track() records it; anything else in the emit state is dropped."""
+    if not isinstance(entry, dict) or entry.get("room") not in rooms_joined:
+        return False
+    seq, to = entry.get("seq"), entry.get("to")
+    return (isinstance(seq, int) and not isinstance(seq, bool) and seq >= 1 and _finite(entry.get("ts"))
+            and isinstance(to, list) and all(render.receipt_pair_ok(name, entry.get("id")) for name in to)
+            and (entry.get("mode") is None or isinstance(entry.get("mode"), str)))
+
+
+def _valid_evidence(entry) -> bool:
+    """A delivery-evidence entry as _delivered() records it. Anything else proves nothing."""
+    return (isinstance(entry, dict) and isinstance(entry.get("room"), str) and isinstance(entry.get("id"), str)
+            and isinstance(entry.get("seq"), int) and not isinstance(entry.get("seq"), bool)
+            and _finite(entry.get("ts")))
+
+
+def _delivered(previous, emitted, now):
+    """This session's delivery evidence after a fire: the addressed (by name) asks and props it
+    emitted to its model, as {room, id, seq, ts}. Only lines emitted whole count, never held,
+    overflowing or digested ones (a digest line doesn't show the text), so a sender's receipt can't
+    report a held message seen. Bounded: the last MAX_DELIVERED, none older than RECEIPT_MAX_AGE;
+    malformed entries are dropped."""
+    out = [entry for entry in previous[-MAX_DELIVERED:]
+           if _valid_evidence(entry) and now - entry["ts"] <= RECEIPT_MAX_AGE]
+    keys = {(entry["room"], entry["id"], entry["seq"]) for entry in out}
+    for it in emitted:
+        msg = it["msg"]
+        key = (it["room"], msg["id"], msg["seq"])
+        if (msg.get("kind") in RECEIPT_KINDS and render.addressed_by_name(msg, it.get("me")) and not it.get("digest")
+                and key not in keys):
+            keys.add(key)
+            out.append({"room": it["room"], "id": msg["id"], "seq": msg["seq"], "ts": now})
+    return out[-MAX_DELIVERED:]
+
+
+def _receipts(fire, now):
+    """(pairs, pending): the (name, id) pairs to report seen this fire, at most RECEIPTS_PER_FIRE
+    and exactly those render.receipt_line shows, and the entries still pending.
+
+    Seen needs positive evidence: the addressee's own emit state lists the message (room, id and
+    seq) among those it delivered to its model. Held, overflowing, evicted, malformed or forged
+    evidence proves nothing, so the pair stays pending until it ages out: a held message is never
+    reported seen. The addressee's cursor and the room's events are not read. On top of that, the
+    receiver's recorded mode against the sender's (fail-closed: their bypass env is invisible here)
+    drops a name. An addressee who is gone or listed under an invalid sid is dropped for good. A
+    seen pair the line has no room for stays for next fire."""
+    pending, found, emits = [], [], {}
+    for entry in fire.pending:
+        if now - entry["ts"] > RECEIPT_MAX_AGE:
+            continue
+        room, msg_id, seq = entry["room"], entry["id"], entry["seq"]
+        members, _, inbound, _ = fire.room(room)
+        sid_of = {info["name"]: sid for sid, info in members.items()}
+        kept = dict(entry, to=[])
+        for name in dict.fromkeys(entry["to"]):
+            if len(found) >= RECEIPTS_PER_FIRE:
+                kept["to"].append(name)  # checked next fire
+                continue
+            target = sid_of.get(name)
+            if target is None or not rooms._valid_sid(target):
+                continue  # gone, or a forged members.json key paths.check_sid would reject
+            if target not in emits:
+                emits[target] = sessions.load_emit(target)["delivered"][-MAX_DELIVERED:]
+            if not any(_valid_evidence(ev) and (ev["room"], ev["id"], ev["seq"]) == (room, msg_id, seq)
+                       for ev in emits[target]):
+                kept["to"].append(name)  # not delivered (yet): held, overflowing or not read
+                continue
+            if trust.content_hold({"sid": fire.sid, "mode": entry.get("mode")}, sessions.recorded_mode(target),
+                                  inbound, {}):
+                continue
+            kept["to"].append(name)  # until the line shows it
+            found.append((kept, name, msg_id))
+        pending.append(kept)
+    _, shown = render.receipt_parts([(name, msg_id) for _, name, msg_id in found])
+    left = len(shown)
+    for kept, name, msg_id in found:
+        valid = render.receipt_pair_ok(name, msg_id)
+        if valid and left == 0:
+            continue  # cut for length: stays pending
+        kept["to"].remove(name)  # shown, or never showable
+        left -= 1 if valid else 0
+    return shown, [kept for kept in pending if kept["to"]]
 
 
 def _ref_message(ref, rooms_joined):
@@ -331,6 +489,8 @@ def _read_room(fire, room):
         key = (room, msg["id"], msg["seq"])
         if msg["seq"] <= dedupe or key in fire.seen or key in fire.ahead_keys:
             continue  # delivered before a reset, or taken already (last fire's emit state, or ahead)
+        if msg["sid"] == fire.sid:
+            fire.track(room, msg)
         action, reason = fire.verdict(room, msg)
         if action == "deliver":
             fire.deliver(room, msg, {"room": room, "off": line_off, "len": len(raw), "id": msg["id"]})
@@ -374,7 +534,7 @@ def _look_ahead(fire, room, rest, floor):
 
 def _deliver_locked(sid, meta, inp, event, env):
     state = sessions.load_emit(sid)
-    fire = _Fire(sid, meta, env, state["ahead"])
+    fire = _Fire(sid, meta, env, state["ahead"], state["receipts"])
     cfg = config.load()
     _take_from_last_fire(fire, state, _text(inp.get("transcript_path")) or _text(meta.get("transcript_path")))
     new_cursors = {}
@@ -383,7 +543,15 @@ def _deliver_locked(sid, meta, inp, event, env):
         if moved:
             new_cursors[room] = moved
 
-    context, emitted, overflow = render.build(fire.items, fire.me, cfg["render_budget_chars"], cfg["clip_chars"])
+    addressed_clip = max(cfg["clip_chars"], cfg["clip_addressed_chars"])
+    for it in fire.items:
+        it["clip"] = addressed_clip if render.addressed_by_name(it["msg"], it["me"]) else cfg["clip_chars"]
+    # Receipts cost nothing when none is pending. A shown receipt is done: it is never recorded for
+    # transcript confirmation, so each is shown at most once.
+    pairs, fire.pending = _receipts(fire, time.time()) if fire.pending else ([], [])
+    tail = render.receipt_line(pairs)
+    context, emitted, overflow = render.build(fire.items, fire.me, cfg["render_budget_chars"], cfg["clip_chars"],
+                                              tail=tail)
     message = render.system_message(emitted, fire.held, fire.me)
     # Record what we emit, and what overflowed, before advancing cursors: if this process dies
     # before its output reaches Claude, the next fire finds these lines missing from the transcript
@@ -391,9 +559,12 @@ def _deliver_locked(sid, meta, inp, event, env):
     # by the render caps): ids repeat across rooms, so an id alone can't confirm a delivery.
     emit = {"emitted": [dict(it["ref"], line=it["line"]) for it in emitted],
             "overflow": [it["ref"] for it in overflow] + fire.unread,
-            "ahead": [ref for room in fire.rooms for ref in fire.ahead.get(room, ())]}
+            "ahead": [ref for room in fire.rooms for ref in fire.ahead.get(room, ())],
+            "receipts": fire.pending,
+            "delivered": _delivered(state["delivered"], emitted, time.time())}
     if emit != state:
-        sessions.save_emit(sid, emit["emitted"], emit["overflow"], emit["ahead"])
+        sessions.save_emit(sid, emit["emitted"], emit["overflow"], emit["ahead"], emit["receipts"],
+                           emit["delivered"])
     for room, (new, was_reset, was_restarted) in new_cursors.items():
         cursor.save(sid, room, new, reset=was_reset, restarted=was_restarted)
     out = {}
@@ -521,15 +692,18 @@ def _reminder(sid, meta) -> str:
     return line
 
 
-# `passnote post|claim|join|leave` as a command word: at the start, or after whitespace, a shell
-# separator, a quote, "$(", a backtick, a backslash or a path slash. So "/abs/passnote post" and
-# `bash -c "passnote post"` match; "mypassnote post" and "passnote-post" don't.
+# A state-changing verb (`passnote post|claim|join|leave|subscribe|unsubscribe|digest`) as a command
+# word: at the start, or after whitespace, a shell separator, a quote, "$(", a backtick, a backslash or
+# a path slash. So "/abs/passnote post" and `bash -c "passnote post"` match; "mypassnote post" and
+# "passnote-post" don't.
 _WRITE_CMD = re.compile(
-    r"""(?:^|[\s;&|(`$"'/\\])passnote["']?[ \t]+(?:--[ \t]+)?["']?(?:post|claim|join|leave)(?![\w-])""")
+    r"""(?:^|[\s;&|(`$"'/\\])passnote["']?[ \t]+(?:--[ \t]+)?["']?"""
+    r"""(?:post|claim|join|leave|subscribe|unsubscribe|digest)(?![\w-])""")
 
 
 def handle_pre_tool_use(inp, event, env):
-    """Subagents share the parent's session id (A8): don't let them post or change membership as the parent."""
+    """Subagents share the parent's session id (A8): don't let them post or change membership or
+    subscriptions as the parent."""
     if not inp.get("agent_id") or inp.get("tool_name") != "Bash":
         return None
     tool_input = inp.get("tool_input")
@@ -539,7 +713,7 @@ def handle_pre_tool_use(inp, event, env):
     return {"hookSpecificOutput": {
         "hookEventName": "PreToolUse",
         "permissionDecision": "deny",
-        "permissionDecisionReason": ("passnote: a subagent can't post or change membership as its parent "
+        "permissionDecisionReason": ("passnote: a subagent can't post or change membership or subscriptions as its parent "
                                      "session; report back to the parent instead (if the command only mentions passnote, "
                                      "in grep, echo or a message, reword it so 'passnote <verb>' is not a command word)"),
     }}
