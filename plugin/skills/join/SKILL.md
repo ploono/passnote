@@ -1,6 +1,6 @@
 ---
 name: join
-description: Join this repo's passnote room, as [name] or the session's /rename name
+description: Join this repo's passnote room
 disable-model-invocation: true
 argument-hint: "[name]"
 allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/bin/passnote join *)

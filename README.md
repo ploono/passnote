@@ -27,7 +27,8 @@ output 5×), measured from real session transcripts. A delivery costs its payloa
 twice when written, then a tenth of that on every later call. With passnote installed, a session that
 hasn't joined a room pays only the skill's entry in the skill list: about 40–60 tokens. `claude plugin
 details passnote` estimates ~37 with a fresh Claude Code config and ~58 with an established one (Claude
-Code 2.1.288). The measurements and design are in `docs/superpowers/specs/`.
+Code 2.1.288), plus < 20 for `/passnote:join`. That one costs nothing: only you can run it, so it isn't in
+the model's skill list (checked on 2.1.295). The measurements and design are in `docs/superpowers/specs/`.
 
 ## When not to use it
 - Two sessions trading an occasional message: Claude Code's built-in SendMessage is simpler.
@@ -53,9 +54,11 @@ Requirements:
   default room. With older git, or outside a repository, the default room is per directory.
 
 ## Quick start
-In each session, ask Claude to run `passnote join --as <session name>`. Sessions in the same repo land in
-the same room. Then just work: when Claude runs `passnote post`, the other members see the message on their
-next turn. You see a one-line `passnote[room]: …` notice in the terminal every time a message is delivered.
+In each session, type `/passnote:join <name>`. If you named the session with `/rename <name>`, a bare
+`/passnote:join` uses that name. You can also ask Claude to run `passnote join --as <name>`. With the
+sandbox on, add passnote's storage to `allowWrite` first (see [Setup notes](#setup-notes)). Sessions in the
+same repo land in the same room. Then just work: when Claude runs `passnote post`, the other members see
+the message on their next turn. You see a one-line `passnote[room]: …` notice in the terminal every time a message is delivered.
 
 To follow the rooms from your own terminal, where `passnote` isn't on your PATH yet: ask Claude to run
 `passnote shim` once (or run `<plugin>/bin/passnote shim`, where `<plugin>` is the plugin's directory
@@ -123,7 +126,8 @@ counted, and `passnote digest off` goes back to every line. Like a subscription,
 See [SECURITY.md](SECURITY.md) to report a vulnerability.
 
 ## Setup notes
-- Sandbox: add `{"sandbox":{"enabled":true,"filesystem":{"allowWrite":["~/.local/state/passnote"]}}}` to your settings. Hooks need nothing.
+- Sandbox: add `{"sandbox":{"enabled":true,"filesystem":{"allowWrite":["~/.local/state/passnote"]}}}` to your settings. `/passnote:join` needs it too; hooks need nothing.
+- `/passnote:join` needs no permission rule: it allows itself `passnote join` only, and only you can run it.
 - Suggested permissions: `Bash(passnote post *)`, `Bash(passnote read *)`, `Bash(passnote who *)`, `Bash(passnote join *)`, `Bash(passnote claim *)`, `Read(~/.local/state/passnote/rooms/*/files/*)`. Don't allow `Bash(passnote *)`. The `Read` rule covers only full-text files, not room logs; adjust the path if `PASSNOTE_HOME` or `XDG_STATE_HOME` is set.
 - `passnote post` never rings a doorbell between sessions in different permission classes. The receiver gets such a message on its next turn only if it was launched with `PASSNOTE_ALLOW_BYPASS=1`.
 - Run `passnote doctor` to check an installation.
