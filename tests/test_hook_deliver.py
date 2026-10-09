@@ -1329,6 +1329,7 @@ class OwnAcrossClearTest(DeliverCase):
         post(self.b, "r", "from bob")
         self.assertIn("from bob", self.context(self.deliver(self.a)))
 
+
 class EmitStateTest(DeliverCase):
     def test_a_fallback_line_is_not_delivery_evidence(self):
         it = {"room": "r", "msg": {"id": "a1", "seq": 1, "kind": "ask", "to": ["bob"]}, "me": "bob", "fallback": True}
@@ -1351,7 +1352,6 @@ class EmitStateTest(DeliverCase):
         post(self.a, "r", "q", kind="ask", to=["bob"])
         self.deliver(self.b)
         self.assertEqual([entry["id"] for entry in sessions.load_emit(self.b)["delivered"]], ["a1"])
-
 
 
 if __name__ == "__main__":

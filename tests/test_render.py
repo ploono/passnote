@@ -461,14 +461,20 @@ class BuildTest(unittest.TestCase):
     def test_a_first_line_too_large_even_at_min_clip_falls_back_to_a_fixed_shape(self):
         wide = "\U0001F600" * 64
         m = msg(id=wide, to=[wide] * 4, kind=wide, re=wide, text="x" * 2000)
-        items = [dict(item(m, room="r1"), display=wide), item(msg(id="b2", seq=2), room="r2")]
-        ctx, emitted, _ = render.build(items, "bob", 2000, 600)
-        self.assertLessEqual(len(json.dumps(ctx)) - 2, render.MAX_CONTEXT_JSON)
-        self.assertTrue(emitted[0].get("fallback"))
-        self.assertIn("(too large to show in this turn; passnote read --id ", emitted[0]["line"])
-        self.assertTrue(emitted[0]["line"].startswith("["))  # multi-room: the room prefix stays
-        self.assertEqual(len(emitted[0]["line"].splitlines()), 1)
-        self.assertFalse(any(it.get("fallback") for it in emitted[1:]))
+        shown = render.escape_text(render.clip_field(wide))
+        tail = "passnote: seen by " + "b" * 282  # a receipt-sized tail: the old code broke the cap here
+        for first in ({}, {"clip": render.MIN_CLIP}):  # shrunk to MIN_CLIP, or already there
+            with self.subTest(first=first):
+                items = [dict(item(m, room="r1"), display=wide, **first), item(msg(id="b2", seq=2), room="r2")]
+                ctx, emitted, _ = render.build(items, "bob", 2000, 600, tail=tail)
+                self.assertLessEqual(len(json.dumps(ctx)) - 2, render.MAX_CONTEXT_JSON)
+                self.assertTrue(emitted[0].get("fallback"))
+                # multi-room: the room prefix stays, and the id is the first token after it
+                self.assertTrue(emitted[0]["line"].startswith(
+                    f"[{shown}] {shown} (too large to show in this turn; passnote read --id {shown})"))
+                self.assertEqual(len(emitted[0]["line"].splitlines()), 1)
+                self.assertFalse(any(it.get("fallback") for it in emitted[1:]))
+                self.assertTrue(ctx.endswith("\n" + tail))
 
     def test_the_fallback_line_is_bounded_whatever_the_id(self):
         wide = "\U0001F600" * 5000
