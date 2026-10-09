@@ -158,7 +158,7 @@ For workers a coordinator or a human launches to stay resident, such as a review
 
 ### 4.7 Direct-socket doorbell (Phase L4)
 
-- Writing to `CLAUDE_CODE_MESSAGING_SOCKET` directly. Sandboxed Bash can't reach it (A5), but hooks run unsandboxed. So `post` writes a ring request to `sessions/<sender>/ring.jsonl`, and the sender's own next `PostToolBatch` (the one that ends the `post` call) rings, with the same gist the printed doorbell would carry.
+- Writing to `CLAUDE_CODE_MESSAGING_SOCKET` directly. Sandboxed Bash can't reach it (A5), but hooks run unsandboxed. So `post` writes a ring request to `sessions/<sender>/ring.jsonl`, and the sender's own next `PostToolBatch` (the one that ends the `post` call) rings. The ring carries the same text-free doorbell that `post` prints (#19, merged in #32): `<id> from <sender>: passnote note waiting`. It carries no message text; the message itself arrives through the hook.
 - This removes the sender's 11–16k doorbell call for every warm wake, and lets the cross-machine sync wake a local member when no listener is armed.
 - A **version guard** allows it only on Claude Code versions listed after D5 passed on them. Any other version, and any socket error, falls back to the printed `WAKE` line. A ring is never retried blindly.
 - **Shipped only if D5 shows** that the receiving Claude Code applies its own inbound holds and `crossSessionInbound` to a socket-written message, and stamps `from-mode` itself rather than trusting the payload. Otherwise it is dropped (Q6).
