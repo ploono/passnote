@@ -138,7 +138,6 @@ class WhoTest(CliCase):
         self.assertIn("x\\nred ", line)
         self.assertLessEqual(len(line.split(": ", 1)[1]), 80)
 
-
     def test_who_shows_threads(self):
         self.run_cli(self.b, "subscribe", "auth")
         out = self.run_cli(self.a, "who")[1]

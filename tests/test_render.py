@@ -163,7 +163,6 @@ class RenderLineTest(unittest.TestCase):
         self.assertIn("(+100 chars: passnote read --id a1)", bad_room)
         self.assertTrue(as_bool.endswith("say: z"), as_bool)
 
-
     def test_thread_follows_kind_and_re(self):
         self.assertEqual(render.render_line(msg(thread="auth"), "bob", MEMBERS, 600), "a1 alice→all say #auth: hi")
         self.assertEqual(render.render_line(msg(thread="auth", kind="ans", re="b2", to=["bob"]), "bob", MEMBERS, 600),
@@ -458,7 +457,6 @@ class BuildTest(unittest.TestCase):
                 self.assertLess(len(json.dumps(out, ensure_ascii=True)), 8192)
                 if overflow:
                     self.assertIn("not shown yet", context)
-
 
 
 class ReceiptLineTest(unittest.TestCase):

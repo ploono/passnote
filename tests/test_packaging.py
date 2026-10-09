@@ -128,7 +128,6 @@ class ManifestTest(unittest.TestCase):
             self.assertEqual(modes.get(path), "100755", path)
 
 
-
 JOIN_SKILL = os.path.join(PLUGIN, "skills", "join", "SKILL.md")
 # The ```! block of /passnote:join, line for line. Claude Code pastes the typed arguments into its
 # text before a shell parses it, so "$ARGUMENTS" would run a typed $(...); a quoted heredoc doesn't

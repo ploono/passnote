@@ -350,7 +350,7 @@ def _receipts(fire, now):
                 kept["to"].append(name)  # checked next fire
                 continue
             target = sid_of.get(name)
-            if target is None or not rooms._valid_sid(target):
+            if target is None or not paths.valid_sid(target):
                 continue  # gone, or a forged members.json key paths.check_sid would reject
             if target not in emits:
                 emits[target] = sessions.load_emit(target)["delivered"][-MAX_DELIVERED:]

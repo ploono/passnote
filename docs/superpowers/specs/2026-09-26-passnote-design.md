@@ -2,7 +2,7 @@
 
 Amended by .scratch/passnote-phase-a/issues/01 (takeover only when gone; gc keeps gone members 7 days) and 02 (WAIT / overflow / unanswered).
 
-**Status:** spec v2.2 (2026-10-09).
+**Status:** spec v2.3 (2026-10-09).
 - v2 incorporates the multi-agent review in `2026-09-27-passnote-spec-review.md`; finding ids (F1…F43) are cited inline.
 - v2.1 folds in the results of spikes A1–A8 (§13), run on Claude Code 2.1.283 / macOS.
 - v2.2 (2026-10-09) amends §4, §6, §7, §8 and §10 from field feedback (#19, #20, #27, #28, #25, #26, #5).
@@ -12,6 +12,8 @@ Amended by .scratch/passnote-phase-a/issues/01 (takeover only when gone; gc keep
   - #25 (§4, §6, §7 step 5, §10): threads. A message may carry `thread` (`post --thread <name>`; a reply inherits its ask's thread). A member with a subscription (`subscribe`/`unsubscribe`, stored as `threads` on its `members.json` entry) is delivered only its threads, plus unthreaded lines, props, replies to its own posts and lines addressed to it by name.
   - #26 (§7, §10): digest mode. A member with `digest: true` on its `members.json` entry (`passnote digest on|off`) gets one line per (room, thread) with new activity instead of every line; props, replies to its own posts, lines posted with `--wake`, and `ask`, `err`, `prop`, `nak` and `ans` addressed to it by name still arrive whole.
   - #5 (§10): `/passnote:join [name]`, a skill only the human can run, joins without a model tool call. It hands the typed name to `join --name-stdin` as `[<name>]` through a quoted heredoc.
+- v2.3 (2026-10-09) amends §5, §6, §7 and §10 from the fixes batch (#6, #7, #9, #31).
+  - #9 (§7 step 4): a deleted and refilled log is a documented known limit.
 
 Approved by the author on 2026-09-27.
 
@@ -245,6 +247,7 @@ Readers open the file in binary mode and split on `b"\n"` only.
 4. For each joined room, read from `cursor.off` to the last complete `\n`.
    - If the inode changed or `off > size`, reset to 0 and dedupe by `seq ≤ cursor.seq`; log it (F16).
    - Cap the bytes read per fire at 256 KB.
+   - Known limit (#9): a log deleted by hand and recreated is still deduped by the old `seq`. If it grows past a member's cursor seq before that member's next fire, the new messages at or below that seq are never delivered to it. passnote never deletes a log. A fix needs a log identity in the room meta and in every cursor (a format change), so it is deferred.
 5. Filter out:
    - lines with my own `sid`;
    - lines whose `to` excludes me;
@@ -256,7 +259,7 @@ Readers open the file in binary mode and split on `b"\n"` only.
    2. other addressed messages;
    3. broadcasts.
 
-   A single message longer than its clip is clipped: 1,500 characters (`clip_addressed_chars`) when addressed to the receiver by name, else 600 (`clip_chars`); the larger of the two applies to addressed messages. Non-Latin text may clip earlier, because it costs more of the 8 KB hook output. The clipped form is `… (+N chars: passnote read --id b112)`. A message with a full-text file (#27) ends `… (+N chars: full text in <absolute path>)` instead, where N is `full_chars` minus the characters shown; the path is derived from the room and an id matching `^[a-z]{1,72}[0-9]{1,18}$`, never read from the log, and the hook never stats the file. A forged id, or a `full_chars` that isn't an integer larger than the stored text (a string, bool, float, list or too small a number), is ignored: the line is still delivered, with the `read --id` note when it is clipped. `read --id` prints the stored 4,000 characters and the same note; the receiver opens the file with Read. Messages that don't fit are listed by id on one overflow line and stay pending. An addressed message is never skipped silently.
+   A single message longer than its clip is clipped: 1,500 characters (`clip_addressed_chars`) when addressed to the receiver by name, else 600 (`clip_chars`); the larger of the two applies to addressed messages. Non-ASCII text may clip earlier, because it costs more of the 8 KB hook output. The clipped form is `… (+N chars: passnote read --id b112)`. A message with a full-text file (#27) ends `… (+N chars: full text in <absolute path>)` instead, where N is `full_chars` minus the characters shown; the path is derived from the room and an id matching `^[a-z]{1,72}[0-9]{1,18}$`, never read from the log, and the hook never stats the file. A forged id, or a `full_chars` that isn't an integer larger than the stored text (a string, bool, float, list or too small a number), is ignored: the line is still delivered, with the `read --id` note when it is clipped. `read --id` prints the stored 4,000 characters and the same note; the receiver opens the file with Read. Messages that don't fit are listed by id on one overflow line and stay pending. An addressed message is never skipped silently.
 7. Emit exactly one JSON object on stdout:
    `{"hookSpecificOutput":{"hookEventName":"<event>","additionalContext":"<header>\n<lines>"},"systemMessage":"passnote[<room>]: 2 from session-b (ask b112)"}`.
    The systemMessage makes every delivery visible to the human (F26). A3 verified that it is shown to the user, never sent to the model, and costs 0 tokens.

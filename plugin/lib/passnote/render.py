@@ -89,7 +89,7 @@ def gist(text, limit) -> str:
     return escape_text(s[:keep]) + "…"
 
 
-def _clip_field(value, limit=FIELD_CLIP) -> str:
+def clip_field(value, limit=FIELD_CLIP) -> str:
     """Clip a head field (never message text) to `limit` characters BEFORE escaping, so a forged
     field of unbounded length can never make a rendered line's head unbounded."""
     s = str(value)
@@ -100,7 +100,7 @@ def audience(to, me) -> str:
     if not isinstance(to, list):
         return "all"
     if me is None or me not in to:
-        names = [escape_text(_clip_field(name)) for name in to[:MAX_TO_NAMES_SHOWN]]
+        names = [escape_text(clip_field(name)) for name in to[:MAX_TO_NAMES_SHOWN]]
         joined = ",".join(names)
         if len(to) > MAX_TO_NAMES_SHOWN:
             joined += f",+{len(to) - MAX_TO_NAMES_SHOWN}"
@@ -118,7 +118,7 @@ def _resolved_name(msg, members) -> str:
     claimed = str(msg.get("from", "?"))
     shown = member.get("name") or claimed
     flag = "" if member.get("name") == claimed else " (unverified)"
-    return f"{escape_text(_clip_field(shown))}{flag}"
+    return f"{escape_text(clip_field(shown))}{flag}"
 
 
 def addressed_by_name(msg, me) -> bool:
@@ -158,22 +158,22 @@ def digest_line(group, multi) -> str:
     first, last = group[0], group[-1]
     thread = thread_of(first["msg"])
     label = f"#{thread}" if thread else "unthreaded"  # a valid name needs no escaping
-    first_id = escape_text(_clip_field(first["msg"].get("id", "?")))
+    first_id = escape_text(clip_field(first["msg"].get("id", "?")))
     span = first_id
     if len(group) > 1:
-        span = f"{first_id}..{escape_text(_clip_field(last['msg'].get('id', '?')))}"
+        span = f"{first_id}..{escape_text(clip_field(last['msg'].get('id', '?')))}"
     line = (f"{label}: {len(group)} new ({span}), last {_resolved_name(last['msg'], last['members'])}: "
             f"{gist(last['msg'].get('text', ''), DIGEST_GIST_CHARS)}")
     if multi:
-        line = f"[{escape_text(_clip_field(first.get('display') or first['room']))}] {line}"
+        line = f"[{escape_text(clip_field(first.get('display') or first['room']))}] {line}"
     return line
 
 
 def render_line(msg, me, members, clip, room=None) -> str:
-    msg_id = escape_text(_clip_field(msg.get("id", "?")))
-    head = f"{msg_id} {_resolved_name(msg, members)}→{audience(msg.get('to'), me)} {escape_text(_clip_field(msg.get('kind', 'say')))}"
+    msg_id = escape_text(clip_field(msg.get("id", "?")))
+    head = f"{msg_id} {_resolved_name(msg, members)}→{audience(msg.get('to'), me)} {escape_text(clip_field(msg.get('kind', 'say')))}"
     if msg.get("re"):
-        head += f" re={escape_text(_clip_field(msg['re']))}"
+        head += f" re={escape_text(clip_field(msg['re']))}"
     thread = thread_of(msg)
     if thread:
         head += f" #{thread}"  # a valid name needs no escaping
@@ -305,7 +305,7 @@ def build(items, me, budget, clip, tail=None):
     def rendered(it, clip_val):
         line = render_line(it["msg"], it.get("me", me), it["members"], clip_val, room=it["room"])
         if multi:
-            line = f"[{escape_text(_clip_field(it.get('display') or it['room']))}] {line}"
+            line = f"[{escape_text(clip_field(it.get('display') or it['room']))}] {line}"
         return line
 
     # used: characters so far (the budget); size: the context's serialized JSON size so far.
@@ -363,7 +363,7 @@ def build(items, me, budget, clip, tail=None):
         def overflow_line(n_ids):
             if n_ids <= 0:
                 return _overflow_stub(len(overflow))
-            ids = ", ".join(escape_text(_clip_field(it["msg"].get("id", "?"))) for it in overflow[:n_ids])
+            ids = ", ".join(escape_text(clip_field(it["msg"].get("id", "?"))) for it in overflow[:n_ids])
             more = "" if len(overflow) <= n_ids else f" and {len(overflow) - n_ids} more"
             return f"… {len(overflow)} not shown yet: {ids}{more} (they come next; passnote read --id <id>)"
 
@@ -386,7 +386,7 @@ def build(items, me, budget, clip, tail=None):
 
 
 def _held_gist(h, gist_chars) -> str:
-    return (f"{escape_text(_clip_field(h['msg'].get('id', '?')))} "
+    return (f"{escape_text(clip_field(h['msg'].get('id', '?')))} "
             f"{_resolved_name(h['msg'], h.get('members', {}))}: "
             f"{gist(h['msg'].get('text', ''), gist_chars)}")
 
@@ -402,8 +402,8 @@ def _room_summary(display, its, me) -> str:
     if len(senders) > MAX_NAMES_PER_ROOM:
         names += f", +{len(senders) - MAX_NAMES_PER_ROOM}"
     top = min(its, key=lambda it: (priority(it["msg"], it.get("me", me)), it["msg"].get("seq", 0)))["msg"]
-    return (f"passnote[{escape_text(_clip_field(display))}]: {len(its)} from {names} "
-            f"({escape_text(_clip_field(top.get('kind', 'say')))} {escape_text(_clip_field(top.get('id', '?')))})")
+    return (f"passnote[{escape_text(clip_field(display))}]: {len(its)} from {names} "
+            f"({escape_text(clip_field(top.get('kind', 'say')))} {escape_text(clip_field(top.get('id', '?')))})")
 
 
 def _fallback_summary(emitted, held) -> str:

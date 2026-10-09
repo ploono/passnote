@@ -2,8 +2,10 @@
 it builds, every local reference resolves, and nothing loads from another origin."""
 from __future__ import annotations
 
+import contextlib
 import html.parser
 import importlib.util
+import io
 import json
 import os
 import re
@@ -146,7 +148,10 @@ class BuildTest(unittest.TestCase):
         with self.assertRaises(self.build.BuildError):
             self.build.build(self.tmp)
         self.assertTrue(os.path.exists(keep))
-        self.assertEqual(self.build.main([self.tmp]), 2)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertEqual(self.build.main([self.tmp]), 2)
+        self.assertIn("wasn't built by this script", err.getvalue())
         self.assertTrue(os.path.exists(keep))
 
 

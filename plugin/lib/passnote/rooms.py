@@ -73,14 +73,6 @@ def _running_now(sid, states) -> bool:
     return seen[1]
 
 
-def _valid_sid(sid) -> bool:
-    try:
-        paths.check_sid(sid)
-        return True
-    except paths.PassnoteError:
-        return False
-
-
 def _alias(name, used):
     base = re.sub(r"[^a-z]", "", name.lower()) or "m"
     for size in range(1, len(base) + 1):
@@ -124,7 +116,7 @@ def join(sid, room, name, root, display=None, now=None) -> dict:
                 if _running_now(other, clashing):
                     raise paths.PassnoteError(
                         f"name {name!r} is in use by a running session; pick another with --as", 2)
-                if _valid_sid(other):
+                if paths.valid_sid(other):
                     inherited = cursor.load(other, room)
                     # Can raise LockBusy: nothing is removed yet, so a retry still inherits.
                     _drop_room_from_session(other, room)

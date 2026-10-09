@@ -145,7 +145,6 @@ class JoinTest(CliCase):
         self.assertFalse(os.path.exists(cursor.path(self.a, "r")))
 
 
-
 class JoinNameStdinTest(CliCase):
     """`join --name-stdin`: what /passnote:join feeds it, the typed name framed as `[<name>]` (#5)."""
 

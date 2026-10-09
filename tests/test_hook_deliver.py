@@ -716,7 +716,6 @@ class DeliverFixRound3Test(RoomIdsCase):
         self.assertIn(ask, delivered)  # the new message with the reused id is not skipped
 
 
-
 class DeliverFixRound4Test(RoomIdsCase):
     """Task 12 review fix round 4: a resume point is a position the hook itself could have saved."""
 
@@ -789,7 +788,6 @@ class DeliverFixRound4Test(RoomIdsCase):
         nxt = post(self.a, "r", "next")["id"]
         self.assertEqual([mid for fire in self.drain_ids(self.b) for _, mid in fire], [nxt])
         self.assertEqual(cursor.load(self.b, "r")["seq"], 100)
-
 
 
 class ReceiptTest(DeliverCase):
@@ -1064,6 +1062,7 @@ class ReceiptTest(DeliverCase):
         out = hook.main("PostToolBatch", hook_input(self.a), self.env(self.a))
         self.assertLess(len(out.encode()), 8192)
         self.assertIn("passnote: seen by bob:", json.loads(out)["hookSpecificOutput"]["additionalContext"])
+
 
 class ThreadDeliverTest(DeliverCase):
     def setUp(self):

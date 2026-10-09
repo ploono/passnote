@@ -143,6 +143,6 @@ def doorbell_line(name, msg) -> str:
     # escape_text doubles every backslash, so no field can end in a lone "\" before the closing
     # quote; replacing '"' keeps each field inside message="...". Head fields are clipped like
     # rendered lines (render.FIELD_CLIP), so a forged sender can't make the line unbounded.
-    sender = render.escape_text(render._clip_field(msg.get("from", "?"))).replace('"', "'")
-    msg_id = render.escape_text(render._clip_field(msg.get("id", "?"))).replace('"', "'")
+    sender = render.escape_text(render.clip_field(msg.get("from", "?"))).replace('"', "'")
+    msg_id = render.escape_text(render.clip_field(msg.get("id", "?"))).replace('"', "'")
     return f'WAKE {name}: SendMessage(to="{name}", message="{msg_id} from {sender}: {DOORBELL_TEXT}")'

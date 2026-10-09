@@ -103,6 +103,14 @@ def check_sid(sid) -> str:
     return canonical
 
 
+def valid_sid(sid) -> bool:
+    try:
+        check_sid(sid)
+    except PassnoteError:
+        return False
+    return True
+
+
 def room_dir(room: str) -> str:
     check_name(room, member=False)
     return os.path.join(home(), "rooms", room)
@@ -117,15 +125,16 @@ def makedirs(path: str) -> str:
     return path
 
 
-def atomic_write_json(path: str, obj) -> None:
+def _atomic_write(path: str, write) -> None:
+    """Write through a fresh 0600 temp file (O_EXCL) in the same 0700 directory, then os.replace,
+    so a reader never sees a partial file. What tempfile.mkstemp does, without importing tempfile,
+    which costs every hook several ms (P1)."""
     directory = makedirs(os.path.dirname(path))
-    # A fresh name created with O_EXCL inside our own 0700 directory: what tempfile.mkstemp does,
-    # without importing tempfile, which costs every hook several ms (P1).
     tmp = os.path.join(directory, f".tmp-{os.getpid()}-{os.urandom(6).hex()}")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump(obj, fh, ensure_ascii=True, sort_keys=True)
+            write(fh)
         os.replace(tmp, path)
     except BaseException:
         try:
@@ -133,6 +142,14 @@ def atomic_write_json(path: str, obj) -> None:
         except FileNotFoundError:
             pass
         raise
+
+
+def atomic_write_json(path: str, obj) -> None:
+    _atomic_write(path, lambda fh: json.dump(obj, fh, ensure_ascii=True, sort_keys=True))
+
+
+def atomic_write_text(path: str, text: str) -> None:
+    _atomic_write(path, lambda fh: fh.write(text))
 
 
 def read_json(path: str, default=None):

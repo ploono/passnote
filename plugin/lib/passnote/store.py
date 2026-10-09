@@ -155,24 +155,6 @@ def last_seq(path) -> int:
     return 0
 
 
-def _write_full_text(path, text) -> None:
-    """Write text to path atomically: a fresh 0600 temp file in the same 0700 directory, then
-    os.replace, so a reader never sees a partial file."""
-    directory = paths.makedirs(os.path.dirname(path))
-    tmp = os.path.join(directory, f".tmp-{os.getpid()}-{os.urandom(6).hex()}")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(text)
-        os.replace(tmp, path)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except FileNotFoundError:
-            pass
-        raise
-
-
 def append_message(room: str, rec: dict, alias: str, full_text=None) -> dict:
     """Append rec under the room lock. With full_text (#27), the whole text is written to its
     full-text file first and rec gains full_chars; if the log append then fails, the file is
@@ -190,7 +172,7 @@ def append_message(room: str, rec: dict, alias: str, full_text=None) -> dict:
             written = full_text_path(room, rec["id"])
             if written is None:
                 raise paths.PassnoteError(f"invalid message id {rec['id']!r} for a full-text file", 2)
-            _write_full_text(written, full_text)
+            paths.atomic_write_text(written, full_text)
         try:
             data = json.dumps(rec, ensure_ascii=True, sort_keys=True).encode("ascii") + b"\n"
             if not _ends_with_newline(path):
