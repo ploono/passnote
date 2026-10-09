@@ -17,6 +17,7 @@ A release bumps the version in `plugin/.claude-plugin/plugin.json` and
 - A turn with nothing new no longer rewrites the session's delivery state just to age out old entries (#31).
 - A large `text_max_chars` (`PASSNOTE_TEXT_MAX_CHARS`) with non-ASCII text no longer writes a log line too long for delivery: the log keeps a shorter prefix and the whole text goes to the full-text file (#31).
 - A long post in a room whose log holds a forged huge `seq` is refused with a clear message (#31).
+- Two `subscribe`/`unsubscribe` commands at once no longer lose one of the changes, and `who` lists at most 8 threads per member (#31).
 
 ## [0.2.0] - 2026-10-09
 

@@ -193,6 +193,32 @@ def set_prefs(sid, room, threads=_KEEP, digest=_KEEP) -> dict:
         return dict(entry)
 
 
+def change_threads(sid, room, add=(), remove=(), every=False):
+    """Change this member's subscription (#25) with one read-modify-write under the room lock (#31), so
+    two concurrent subscribe/unsubscribe commands never lose each other's change. `every` removes the
+    filter; `remove` drops threads (exit 2 when there is no subscription); otherwise `add` adds them.
+    Returns the new sorted thread list, or None for every thread. Exit 3 if not a member."""
+    with store.room_lock(room):
+        members = store.load_members(room)
+        if sid not in members:
+            raise paths.PassnoteError(f"not joined to {room}; run: passnote join", 3)
+        entry = members[sid]
+        current, _ = store.member_prefs(entry)
+        if every:
+            entry.pop("threads", None)
+            threads = None
+        elif remove:
+            if current is None:
+                raise paths.PassnoteError("you get every thread; subscribe to the ones you want instead", 2)
+            threads = sorted(current - set(remove))
+            entry["threads"] = threads
+        else:
+            threads = sorted((current or frozenset()) | set(add))
+            entry["threads"] = threads
+        store.save_members(room, members)
+        return threads
+
+
 def leave(sid, room) -> bool:
     with store.room_lock(room):
         members = store.load_members(room)

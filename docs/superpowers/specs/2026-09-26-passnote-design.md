@@ -18,6 +18,7 @@ Amended by .scratch/passnote-phase-a/issues/01 (takeover only when gone; gc keep
   - #7 (§5, §7): /clear carry-over hardening (serialized under the session lock, a time-budgeted retry, stale records dropped, a second /clear finishes the first, a reminder after a heal; items 2 and 4 deferred/wontfix)
   - #31 (§7): a first line too large for any clip has a fixed shape; future-dated receipts and evidence are dropped; pruning never writes on an idle fire.
   - #31 (§6): a log line is at most 64 KB encoded, whatever text_max_chars is.
+  - #31 (§10): subscribe/unsubscribe change the set under the room lock; who and subscribe show at most 8 thread names.
 
 Approved by the author on 2026-09-27.
 
@@ -407,7 +408,7 @@ All commands take `--room`. The room is resolved as follows: the explicit `--roo
 | `subscribe [thread ...] [--all]` | Receive only these threads (plus unthreaded lines, props, replies to your posts and addressed lines); `--all` removes the filter; no arguments prints the setting (#25) |
 | `unsubscribe thread ...` | Drop threads from the subscription; refused when there is none (#25) |
 | `digest on\|off` | Digest mode: one line per thread with new activity; props, replies to your posts, `--wake` lines and asks, errs, props, naks and answers addressed to you still arrive whole (#26) |
-| `who` | Members, warm or cold, name and permission mode, thread subscription, digest mode, last error, pending addressed messages, claims, whether props were seen |
+| `who` | Members, warm or cold, name and permission mode, thread subscription (at most 8 names, then +N), digest mode, last error, pending addressed messages, claims, whether props were seen |
 | `watch [room \| --all]` | Live colored view of messages, holds, wake decisions and pending items |
 | `doctor` | Checks (§11) |
 | `gc` | Prune dead cursors, stale members and orphaned session dirs. Also runs opportunistically on `join` |

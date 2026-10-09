@@ -684,6 +684,38 @@ class ThreadTest(CliCase):
         self.assertEqual(self.run_cli(self.c, "unsubscribe", "auth", "--room", "r")[0], 3)
         self.assertNotIn("threads", store.load_members("r")[self.b])
 
+    def _racing(self, threads):
+        """A room_lock that first stores `threads` for alice: another subscribe that finished just before ours."""
+        real = store.room_lock
+
+        def racing(room, *args, **kwargs):
+            members = store.load_members(room)
+            members[self.a]["threads"] = threads
+            store.save_members(room, members)
+            return real(room, *args, **kwargs)
+
+        return racing
+
+    def test_subscribe_keeps_a_change_made_just_before_it_took_the_lock(self):
+        with mock.patch.object(store, "room_lock", self._racing(["first"])):
+            self.assertEqual(self.run_cli(self.a, "subscribe", "second")[0], 0)
+        self.assertEqual(store.load_members("r")[self.a]["threads"], ["first", "second"])
+
+    def test_unsubscribe_keeps_a_change_made_just_before_it_took_the_lock(self):
+        self.run_cli(self.a, "subscribe", "x", "y")
+        with mock.patch.object(store, "room_lock", self._racing(["x", "y", "z"])):
+            self.assertEqual(self.run_cli(self.a, "unsubscribe", "y")[0], 0)
+        self.assertEqual(store.load_members("r")[self.a]["threads"], ["x", "z"])
+
+    def test_who_and_subscribe_list_at_most_8_threads(self):
+        members = store.load_members("r")
+        members[self.a]["threads"] = [f"t{i:02d}" for i in range(100)]
+        store.save_members("r", members)
+        _, out, _ = self.run_cli(self.a, "who")
+        self.assertIn("· threads t00, t01, t02, t03, t04, t05, t06, t07, +92", out)
+        _, out, _ = self.run_cli(self.a, "subscribe")
+        self.assertEqual(out, "threads in r: t00, t01, t02, t03, t04, t05, t06, t07, +92\n")
+
     def test_read_thread_filter(self):
         self.run_cli(self.a, "post", "--thread", "auth", stdin="one")
         self.run_cli(self.a, "post", "--thread", "db", stdin="two")

@@ -353,35 +353,37 @@ def cmd_claim(args, stdin, stdout, env):
     return _post(sid, room, args.what, "claim", None, None, False, False, False, stdout)
 
 
+# Thread names `who` and `subscribe` print per member: a forged members.json list can be any length.
+THREADS_SHOWN = 8
+
+
+def _thread_names(threads) -> str:
+    names = sorted(threads)
+    shown = ", ".join(names[:THREADS_SHOWN])
+    return shown + (f", +{len(names) - THREADS_SHOWN}" if len(names) > THREADS_SHOWN else "")
+
+
 def _threads_line(room, threads) -> str:
     if threads is None:
         shown = "all"
     else:
-        shown = ", ".join(sorted(threads)) or "none (you still get unthreaded lines, props, lines addressed to you and replies to your posts)"
+        shown = _thread_names(threads) or "none (you still get unthreaded lines, props, lines addressed to you and replies to your posts)"
     return f"threads in {room}: {shown}\n"
-
-
-def _my_threads(args, env):
-    """(sid, room, my current thread set or None) after validating the thread names (exit 2), then
-    membership (exit 3)."""
-    for name in args.threads:
-        paths.check_name(name)
-    sid, meta = _session(env)
-    room = _room(args, meta)
-    threads, _ = store.member_prefs(_members_or_exit(sid, room)[sid])
-    return sid, room, threads
 
 
 def cmd_subscribe(args, stdin, stdout, env):
     if args.all and args.threads:
         raise paths.PassnoteError("pass thread names or --all, not both", 2)
-    sid, room, threads = _my_threads(args, env)
+    for name in args.threads:
+        paths.check_name(name)
+    sid, meta = _session(env)
+    room = _room(args, meta)
     if args.all:
-        rooms.set_prefs(sid, room, threads=None)
-        threads = None
+        threads = rooms.change_threads(sid, room, every=True)
     elif args.threads:
-        threads = sorted((threads or frozenset()) | set(args.threads))
-        rooms.set_prefs(sid, room, threads=threads)
+        threads = rooms.change_threads(sid, room, add=args.threads)
+    else:
+        threads, _ = store.member_prefs(_members_or_exit(sid, room)[sid])
     stdout.write(_threads_line(room, threads))
     return 0
 
@@ -401,11 +403,11 @@ def cmd_digest(args, stdin, stdout, env):
 
 
 def cmd_unsubscribe(args, stdin, stdout, env):
-    sid, room, threads = _my_threads(args, env)
-    if threads is None:
-        raise paths.PassnoteError("you get every thread; subscribe to the ones you want instead", 2)
-    threads = sorted(threads - set(args.threads))
-    rooms.set_prefs(sid, room, threads=threads)
+    for name in args.threads:
+        paths.check_name(name)
+    sid, meta = _session(env)
+    room = _room(args, meta)
+    threads = rooms.change_threads(sid, room, remove=args.threads)
     stdout.write(_threads_line(room, threads))
     return 0
 
@@ -603,7 +605,7 @@ def cmd_who(args, stdin, stdout, env):
                 f"{_session_state(member, now)} · mode {render.gist(mode, 40) if mode else 'unknown'}")
         threads, digest = store.member_prefs(info)
         if threads is not None:
-            line += " · threads " + (", ".join(sorted(threads)) or "none")
+            line += " · threads " + (_thread_names(threads) or "none")
         if digest:
             line += " · digest"
         if member == sid:
