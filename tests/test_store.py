@@ -394,6 +394,7 @@ class ValidMessageTest(HomeCase):
             ("mode", 123), ("mode", ["default"]),
             ("wake", None), ("wake", "yes"), ("wake", 1),
             ("ts", True), ("ts", "1234"),
+            ("thread", 5), ("thread", ["a"]), ("thread", True), ("thread", {"a": 1}),
         ]
         for field, value in cases:
             with self.subTest(field=field, value="<absent>" if value is ABSENT else value):
@@ -411,6 +412,8 @@ class ValidMessageTest(HomeCase):
             # A forged full_chars never hides its line (fails open): render ignores a bad value.
             ("full_chars", "5"), ("full_chars", True), ("full_chars", -1), ("full_chars", 1.5),
             ("full_chars", [1]), ("full_chars", {"n": 1}),
+            # A str thread that isn't a valid name stays valid: render counts it as unthreaded.
+            ("thread", ABSENT), ("thread", None), ("thread", "auth"), ("thread", "a b"), ("thread", ""),
         ]
         for field, value in cases:
             with self.subTest(field=field, value="<absent>" if value is ABSENT else value):
@@ -424,6 +427,22 @@ class ValidMessageTest(HomeCase):
         _, msg = store.iter_messages("r")[-1]
         self.assertEqual(msg, rec)
         self.assertTrue(store.valid_message(msg))
+
+
+class MemberPrefsTest(unittest.TestCase):
+    def test_member_prefs(self):
+        self.assertEqual(store.member_prefs({"name": "b"}), (None, False))
+        self.assertEqual(store.member_prefs({"threads": ["auth", "db"], "digest": True}), (frozenset({"auth", "db"}), True))
+        self.assertEqual(store.member_prefs({"threads": []}), (frozenset(), False))
+        for forged in ("auth", ["a b"], [1], {"auth": 1}, None, ["all"], ["auth", "Claude"], [".."]):
+            with self.subTest(forged=forged):
+                self.assertEqual(store.member_prefs({"threads": forged})[0], None)  # forged: every thread
+        for forged in ("yes", 1, None, [True]):
+            with self.subTest(digest=forged):
+                self.assertFalse(store.member_prefs({"digest": forged})[1])
+        for info in (None, "x", [], 5):
+            with self.subTest(info=info):
+                self.assertEqual(store.member_prefs(info), (None, False))
 
 
 class FullTextTest(HomeCase):

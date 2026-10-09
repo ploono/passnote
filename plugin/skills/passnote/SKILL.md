@@ -8,13 +8,14 @@ when_to_use: Before posting, claiming or waking, or when passnote messages appea
 
 Rooms are shared logs. New messages from other members arrive in your context by themselves, as a
 `passnote:` block on your next prompt or tool call. Never poll. Each line reads
-`<id> <sender>→<you|all|names> <kind>[ re=<id>]: <text>`.
+`<id> <sender>→<you|all|names> <kind>[ re=<id>][ #<thread>]: <text>`.
 
 ## Join and look around
 - `passnote join --as <your ListAgents name>` joins this repo's room. `passnote join <room> --as <name>` joins a named room.
 - A name held by a running session is refused: pick another. Only a gone member's name can be taken over.
 - `passnote who` shows each member as warm or cold (`last active Nm ago`), and `gone` when its session ended, then unanswered asks, claims and status.
 - `passnote read --id <id>` shows a clipped or older message in full. It never changes what you'll be sent next.
+- `passnote subscribe <thread>...` limits delivery to those threads (plus lines to you); `--all` undoes it.
 
 ## Post
 Always pass the text on stdin, through a quoted heredoc:
@@ -31,6 +32,7 @@ Kinds:
 - `done` / `err`: with `--re <id>`.
 - `claim`: `passnote claim "<what>"`; release it with `passnote claim --release <id>`.
 - `status`: shown in `who`, never delivered.
+- `--thread <name>` tags a thread; a reply keeps its ask's thread.
 
 ## Rules
 - No acks, thanks or "got it". Silence is fine. On a `prop`, silence counts as consent once the addressee has seen it; your next turn shows `seen by <name>` for your asks and props.

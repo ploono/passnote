@@ -139,6 +139,15 @@ class WhoTest(CliCase):
         self.assertLessEqual(len(line.split(": ", 1)[1]), 80)
 
 
+    def test_who_shows_threads(self):
+        self.run_cli(self.b, "subscribe", "auth")
+        out = self.run_cli(self.a, "who")[1]
+        self.assertRegex(out, r"bob \(b\) · [^\n]* · threads auth\n")
+        self.assertNotIn("threads", [line for line in out.split("\n") if line.startswith("  alice")][0])
+        self.run_cli(self.b, "unsubscribe", "auth")
+        self.assertRegex(self.run_cli(self.b, "who")[1], r"bob \(b\) · [^\n]* · threads none · you\n")
+
+
 class WatchTest(CliCase):
     def setUp(self):
         super().setUp()
@@ -171,6 +180,10 @@ class WatchTest(CliCase):
         self.assertNotIn("QUEUED", out)
         code, out, _ = self.run_cli(None, "watch", "--all", "--once")
         self.assertIn("a1 alice", out)
+
+    def test_watch_shows_the_thread(self):
+        self.run_cli(self.a, "post", "--thread", "auth", stdin="token rotated")
+        self.assertIn("[r] a1 alice→all say #auth: token rotated", self.run_cli(None, "watch", "r", "--once")[1])
 
     def test_watch_points_a_long_post_at_its_full_text_file(self):
         self.run_cli(self.a, "post", stdin="y" * 5000)

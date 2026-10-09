@@ -164,6 +164,20 @@ class RenderLineTest(unittest.TestCase):
         self.assertTrue(as_bool.endswith("say: z"), as_bool)
 
 
+    def test_thread_follows_kind_and_re(self):
+        self.assertEqual(render.render_line(msg(thread="auth"), "bob", MEMBERS, 600), "a1 alice→all say #auth: hi")
+        self.assertEqual(render.render_line(msg(thread="auth", kind="ans", re="b2", to=["bob"]), "bob", MEMBERS, 600),
+                         "a1 alice→you ans re=b2 #auth: hi")
+        self.assertEqual(render.thread_of(msg(thread="auth")), "auth")
+        self.assertIsNone(render.thread_of(msg()))
+
+    def test_forged_thread_values_count_as_unthreaded(self):
+        for forged in ("a b", "<x>", "all", "Claude", "x" * 65, "", "..", None, 5, ["auth"], {"auth": 1}):
+            with self.subTest(forged=forged):
+                self.assertIsNone(render.thread_of(msg(thread=forged)))
+                self.assertEqual(render.render_line(msg(thread=forged), "bob", MEMBERS, 600), "a1 alice→all say: hi")
+
+
 class BuildTest(unittest.TestCase):
     def test_an_item_clip_overrides_the_default_clip(self):
         it = dict(item(msg(to=["bob"], text="x" * 1400)), clip=1500)

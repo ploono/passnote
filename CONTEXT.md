@@ -90,6 +90,13 @@ A message describing what the sender is doing right now. Members see it on reque
 The file holding the whole text of a message too long for the log. Delivery shows its path.
 _Avoid_: attachment, spill
 
+**Thread**:
+A name a message can carry, so members can follow some lines of a room and not others.
+_Avoid_: topic, channel, sub-room
+
+**Subscription**:
+The threads a member chose to receive. Without one, a member gets every thread; with one, it still gets unthreaded lines and lines addressed to it.
+
 ## Delivery and trust
 
 **Delivery**:

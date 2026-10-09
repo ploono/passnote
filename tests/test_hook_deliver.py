@@ -1065,5 +1065,65 @@ class ReceiptTest(DeliverCase):
         self.assertLess(len(out.encode()), 8192)
         self.assertIn("passnote: seen by bob:", json.loads(out)["hookSpecificOutput"]["additionalContext"])
 
+class ThreadDeliverTest(DeliverCase):
+    def setUp(self):
+        super().setUp()
+        post(self.a, "r", "auth news", thread="auth")
+        post(self.a, "r", "db news", thread="db")
+        post(self.a, "r", "plain news")
+        post(self.a, "r", "db question", thread="db", kind="ask", to=["bob"])
+
+    def test_a_subscriber_gets_its_threads_untagged_and_addressed_lines(self):
+        rooms.set_prefs(self.b, "r", threads=["auth"])
+        seen, contexts = self.drain(self.b)
+        self.assertEqual(seen, {"a1", "a3", "a4"})
+        self.assertIn("a1 alice→all say #auth: auth news", contexts[0])
+        self.assertIn("a4 alice→you ask #db: db question", contexts[0])
+        rooms.set_prefs(self.b, "r", threads=None)  # back to every thread: a2 stays behind the cursor
+        self.assertEqual(self.drain(self.b)[0], set())
+
+    def test_an_empty_subscription_still_gets_unthreaded_and_addressed_lines(self):
+        rooms.set_prefs(self.b, "r", threads=[])
+        self.assertEqual(self.drain(self.b)[0], {"a3", "a4"})
+
+    def test_no_subscription_gets_everything(self):
+        self.assertEqual(self.drain(self.b)[0], {"a1", "a2", "a3", "a4"})
+
+    def test_forged_subscription_values_mean_all_threads(self):
+        for forged in ("auth", ["a b"], [1], {"auth": 1}, ["all"]):
+            with self.subTest(forged=forged):
+                sid = new_sid()
+                join(sid, "r", "carol")
+                with store.room_lock("r"):
+                    members = store.load_members("r")
+                    members[sid]["threads"] = forged
+                    store.save_members("r", members)
+                for _ in range(4):
+                    post(self.a, "r", "more", thread="db")
+                self.assertEqual(len(self.drain(sid)[0]), 4)
+                rooms.leave(sid, "r")
+
+    def test_forged_thread_on_a_line_is_delivered(self):
+        rooms.set_prefs(self.b, "r", threads=["auth"])
+        post(self.a, "r", "odd", thread="../x")
+        post(self.a, "r", "odd2", thread="all")
+        seen, contexts = self.drain(self.b)
+        self.assertTrue({"a5", "a6"} <= seen)
+        self.assertIn("a5 alice→all say: odd", "\n".join(contexts))
+
+    def test_a_skipped_line_is_never_emitted_or_evidence(self):
+        """A line skipped for the subscription is never shown and never delivery evidence; the
+        addressed ask in the unsubscribed thread arrives and yields its receipt."""
+        join(self.c, "r", "carol")
+        post(self.a, "r", "carol only", thread="db", kind="ask", to=["carol"])
+        rooms.set_prefs(self.b, "r", threads=["auth"])
+        self.deliver(self.a)  # alice's cursor passes her asks: receipts pending
+        seen, _ = self.drain(self.b)
+        self.assertEqual(seen, {"a1", "a3", "a4"})  # a2 and a5 skipped: never shown to bob's model
+        self.assertEqual([ev["id"] for ev in sessions.load_emit(self.b)["delivered"]], ["a4"])
+        line = [ln for ln in self.context(self.deliver(self.a)).split("\n") if ln.startswith("passnote: seen")]
+        self.assertEqual(line, ["passnote: seen by bob: a4"])
+
+
 if __name__ == "__main__":
     unittest.main()

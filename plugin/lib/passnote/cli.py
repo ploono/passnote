@@ -44,6 +44,7 @@ def build_parser():
     p.add_argument("--to", help="comma-separated member names (default: all)")
     p.add_argument("--kind", default="say", choices=KINDS)
     p.add_argument("--re", dest="re_id", metavar="ID")
+    p.add_argument("--thread", metavar="NAME", help="tag a thread (a reply keeps its ask's thread)")
     urgency = p.add_mutually_exclusive_group()
     urgency.add_argument("--wake", action="store_true", help="doorbell if the addressee is warm")
     urgency.add_argument("--urgent", action="store_true", help="doorbell even if the addressee is cold")
@@ -62,7 +63,19 @@ def build_parser():
     which.add_argument("--id")
     which.add_argument("--since", metavar="ID")
     which.add_argument("--last", type=int, default=20)
+    p.add_argument("--thread", metavar="NAME", help="only this thread's messages")
     p.set_defaults(func=cmd_read, needs_home=True)
+
+    p = sub.add_parser("subscribe", help="receive only these threads (plus unthreaded lines and lines to you)")
+    p.add_argument("threads", nargs="*", metavar="THREAD")
+    p.add_argument("--all", action="store_true", help="every thread again")
+    p.add_argument("--room")
+    p.set_defaults(func=cmd_subscribe, needs_home=True)
+
+    p = sub.add_parser("unsubscribe", help="stop receiving these threads")
+    p.add_argument("threads", nargs="+", metavar="THREAD")
+    p.add_argument("--room")
+    p.set_defaults(func=cmd_unsubscribe, needs_home=True)
 
     # `who` and `watch` only read, and uninstall doesn't need the storage root: they don't create it
     # (`who` in a fresh home leaves it absent) but still refuse one others can write to ("check").
@@ -294,8 +307,10 @@ def cmd_rooms(args, stdin, stdout, env):
 def cmd_post(args, stdin, stdout, env):
     sid, meta = _session(env)
     room = _room(args, meta)
+    if args.thread is not None:
+        paths.check_name(args.thread)
     return _post(sid, room, stdin.read().rstrip("\n"), args.kind, args.to, args.re_id,
-                 args.wake, args.urgent, args.allow_secret_looking, stdout)
+                 args.wake, args.urgent, args.allow_secret_looking, stdout, thread=args.thread)
 
 
 def cmd_claim(args, stdin, stdout, env):
@@ -310,7 +325,50 @@ def cmd_claim(args, stdin, stdout, env):
     return _post(sid, room, args.what, "claim", None, None, False, False, False, stdout)
 
 
-def _post(sid, room, text, kind, to_arg, re_id, wake_flag, urgent, allow_secret, stdout):
+def _threads_line(room, threads) -> str:
+    if threads is None:
+        shown = "all"
+    else:
+        shown = ", ".join(sorted(threads)) or "none (you still get unthreaded lines and lines addressed to you)"
+    return f"threads in {room}: {shown}\n"
+
+
+def _my_threads(args, env):
+    """(sid, room, my current thread set or None) after validating the thread names (exit 2), then
+    membership (exit 3)."""
+    for name in args.threads:
+        paths.check_name(name)
+    sid, meta = _session(env)
+    room = _room(args, meta)
+    threads, _ = store.member_prefs(_members_or_exit(sid, room)[sid])
+    return sid, room, threads
+
+
+def cmd_subscribe(args, stdin, stdout, env):
+    if args.all and args.threads:
+        raise paths.PassnoteError("pass thread names or --all, not both", 2)
+    sid, room, threads = _my_threads(args, env)
+    if args.all:
+        rooms.set_prefs(sid, room, threads=None)
+        threads = None
+    elif args.threads:
+        threads = sorted((threads or frozenset()) | set(args.threads))
+        rooms.set_prefs(sid, room, threads=threads)
+    stdout.write(_threads_line(room, threads))
+    return 0
+
+
+def cmd_unsubscribe(args, stdin, stdout, env):
+    sid, room, threads = _my_threads(args, env)
+    if threads is None:
+        raise paths.PassnoteError("you get every thread; subscribe to the ones you want instead", 2)
+    threads = sorted(threads - set(args.threads))
+    rooms.set_prefs(sid, room, threads=threads)
+    stdout.write(_threads_line(room, threads))
+    return 0
+
+
+def _post(sid, room, text, kind, to_arg, re_id, wake_flag, urgent, allow_secret, stdout, thread=None):
     members = _members_or_exit(sid, room)
     cfg = config.load(room)
     if not text.strip():
@@ -344,15 +402,19 @@ def _post(sid, room, text, kind, to_arg, re_id, wake_flag, urgent, allow_secret,
     me = members[sid]
     rec = {"from": me["name"], "sid": sid, "to": to, "kind": kind, "text": text,
            "mode": sessions.recorded_mode(sid) or "unknown"}
+    by_id = {m["id"]: m for m in _valid_messages(room)} if re_id else {}
     if re_id:
         rec["re"] = re_id
+        if thread is None and re_id in by_id:
+            thread = render.thread_of(by_id[re_id])  # a reply reaches the thread's subscribers (#25)
+    if thread:
+        rec["thread"] = thread
     if wake_flag or urgent:
         rec["wake"] = True
     msg = store.append_message(room, rec, me["alias"], full_text=full_text)
     saved = f" (full text: {store.full_text_path(room, msg['id'])})" if full_text is not None else ""
     stdout.write(f"ok {msg['id']}{saved}\n")
     if isinstance(to, list):
-        by_id = {m["id"]: m for m in _valid_messages(room)} if re_id else {}
         for name in to:
             target = sid_by_name[name]
             if target == sid or not wake.is_eligible(msg, name, target, by_id, members):
@@ -396,6 +458,9 @@ def cmd_read(args, stdin, stdout, env):
             elif verdict == "deliver":
                 visible.append(msg)
         msgs = visible
+    if args.thread is not None:  # before --id, --since and --last
+        paths.check_name(args.thread)
+        msgs = [msg for msg in msgs if msg.get("thread") == args.thread]
     if args.id:
         selected = [msg for msg in msgs if msg["id"] == args.id]
         if not selected:
@@ -489,6 +554,9 @@ def cmd_who(args, stdin, stdout, env):
         mode = smeta.get("permission_mode")
         line = (f"  {render.escape_text(info['name'])} ({render.escape_text(info['alias'])}) · "
                 f"{_session_state(member, now)} · mode {render.gist(mode, 40) if mode else 'unknown'}")
+        threads, _ = store.member_prefs(info)
+        if threads is not None:
+            line += " · threads " + (", ".join(sorted(threads)) or "none")
         if member == sid:
             line += " · you"
         last_error = smeta.get("last_error")

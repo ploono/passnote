@@ -92,9 +92,24 @@ def valid_message(msg) -> bool:
     if "ts" in msg and msg.get("ts") is not None:
         if isinstance(msg.get("ts"), bool) or not isinstance(msg.get("ts"), (int, float)):
             return False
+    # thread: absent/None or str. A str that isn't a valid name counts as unthreaded
+    # (render.thread_of), so a forged one is still delivered, never hidden (#25).
+    if "thread" in msg and msg.get("thread") is not None and not isinstance(msg.get("thread"), str):
+        return False
     # full_chars is deliberately not checked: a forged value must fail open, never hide the line.
     # render_line uses it only when it is an int (not bool) larger than the text, else ignores it.
     return True
+
+
+def member_prefs(info):
+    """(threads, digest) from a member entry: threads is a frozenset of valid thread names, or None
+    for every thread (absent, or not a list of valid names: a forged value fails open); digest is
+    True only for the JSON value true."""
+    threads = info.get("threads") if isinstance(info, dict) else None
+    if not (isinstance(threads, list) and all(paths.valid_member_name(t) for t in threads)):
+        threads = None
+    digest = isinstance(info, dict) and info.get("digest") is True
+    return (frozenset(threads) if threads is not None else None), digest
 
 
 def _open_append(path):

@@ -175,7 +175,7 @@ class _Fire:
         self.env = env
         self.settings_inbound = claude_settings.inbound(env.get("CLAUDE_PROJECT_DIR"))
         self.room_cap = max(1, OVERFLOW_CAP // max(1, len(self.rooms)))
-        self.cache, self.taken = {}, {}
+        self.cache, self.prefs_cache, self.taken = {}, {}, {}
         self.items, self.held, self.seen = [], [], set()
         self.unread = []  # carried overflow refs beyond what one fire re-reads
         self.ahead = {}  # room -> refs taken ahead of the cursor, still ahead of it
@@ -226,9 +226,24 @@ class _Fire:
     def full(self, room) -> bool:
         return self.taken.get(room, 0) >= self.room_cap
 
+    def prefs(self, room):
+        """(threads, digest) for this member in a room, from the members.json this fire already read."""
+        if room not in self.prefs_cache:
+            self.prefs_cache[room] = store.member_prefs(self.room(room)[0].get(self.sid))
+        return self.prefs_cache[room]
+
     def verdict(self, room, msg):
         _, _, inbound, me = self.room(room)
-        return trust.visibility(msg, self.sid, me, self.receiver_mode, inbound, self.env)
+        action, reason = trust.visibility(msg, self.sid, me, self.receiver_mode, inbound, self.env)
+        if action == "deliver":
+            threads, _ = self.prefs(room)
+            thread = render.thread_of(msg)
+            if (threads is not None and thread is not None and thread not in threads
+                    and not render.addressed_by_name(msg, me)):
+                # An unsubscribed thread (#25): done for this member. The cursor passes it, it is
+                # never emitted, so it is never delivery evidence; `read --thread` still shows it.
+                return "skip", None
+        return action, reason
 
     def deliver(self, room, msg, ref, redeliver=False):
         members, display, _, me = self.room(room)
@@ -656,15 +671,18 @@ def _reminder(sid, meta) -> str:
     return line
 
 
-# `passnote post|claim|join|leave` as a command word: at the start, or after whitespace, a shell
-# separator, a quote, "$(", a backtick, a backslash or a path slash. So "/abs/passnote post" and
-# `bash -c "passnote post"` match; "mypassnote post" and "passnote-post" don't.
+# A state-changing verb (`passnote post|claim|join|leave|subscribe|unsubscribe|digest`) as a command
+# word: at the start, or after whitespace, a shell separator, a quote, "$(", a backtick, a backslash or
+# a path slash. So "/abs/passnote post" and `bash -c "passnote post"` match; "mypassnote post" and
+# "passnote-post" don't.
 _WRITE_CMD = re.compile(
-    r"""(?:^|[\s;&|(`$"'/\\])passnote["']?[ \t]+(?:--[ \t]+)?["']?(?:post|claim|join|leave)(?![\w-])""")
+    r"""(?:^|[\s;&|(`$"'/\\])passnote["']?[ \t]+(?:--[ \t]+)?["']?"""
+    r"""(?:post|claim|join|leave|subscribe|unsubscribe|digest)(?![\w-])""")
 
 
 def handle_pre_tool_use(inp, event, env):
-    """Subagents share the parent's session id (A8): don't let them post or change membership as the parent."""
+    """Subagents share the parent's session id (A8): don't let them post or change membership or
+    subscriptions as the parent."""
     if not inp.get("agent_id") or inp.get("tool_name") != "Bash":
         return None
     tool_input = inp.get("tool_input")
@@ -674,7 +692,7 @@ def handle_pre_tool_use(inp, event, env):
     return {"hookSpecificOutput": {
         "hookEventName": "PreToolUse",
         "permissionDecision": "deny",
-        "permissionDecisionReason": ("passnote: a subagent can't post or change membership as its parent "
+        "permissionDecisionReason": ("passnote: a subagent can't post or change membership or subscriptions as its parent "
                                      "session; report back to the parent instead (if the command only mentions passnote, "
                                      "in grep, echo or a message, reword it so 'passnote <verb>' is not a command word)"),
     }}

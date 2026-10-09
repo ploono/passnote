@@ -119,11 +119,21 @@ def addressed_by_name(msg, me) -> bool:
     return isinstance(to, list) and me is not None and me in to
 
 
+def thread_of(msg):
+    """The message's thread (#25): a valid, unreserved name, or None. A forged or invalid value
+    counts as unthreaded, so it is delivered to every member and rendered without a #thread."""
+    thread = msg.get("thread")
+    return thread if paths.valid_member_name(thread) else None
+
+
 def render_line(msg, me, members, clip, room=None) -> str:
     msg_id = escape_text(_clip_field(msg.get("id", "?")))
     head = f"{msg_id} {_resolved_name(msg, members)}→{audience(msg.get('to'), me)} {escape_text(_clip_field(msg.get('kind', 'say')))}"
     if msg.get("re"):
         head += f" re={escape_text(_clip_field(msg['re']))}"
+    thread = thread_of(msg)
+    if thread:
+        head += f" #{thread}"  # a valid name needs no escaping
     # Clip the ORIGINAL text by characters, then escape only the kept part: escaping first and
     # clipping second could cut a multi-character escape (e.g. "\n" -> "\\n") in half.
     raw_text = str(msg.get("text", ""))

@@ -238,12 +238,14 @@ class LifecycleTest(HomeCase):
             "echo `passnote post`", "x\npassnote post", "\\passnote post", "(passnote post)",
             'passnote "post"', "passnote 'claim' x", '"passnote" post', "'passnote' join",
             "passnote -- post", "passnote  --  claim x", "passnote -- 'join'", "echo hi | passnote -- post",
+            "passnote subscribe auth", "passnote unsubscribe auth", "passnote digest on", "passnote subscribe --all",
         ]
         allowed = [
             "passnote read", "passnote who", "passnote watch", "passnote rooms", "passnote doctor",
             "mypassnote post", "passnote-post", "echo passnote", "passnote", "passnote posting",
             "passnote post-mortem", "passnote.post", "passnote\npost", "passnote  'read'", "ls /x/passnote/post", "", "git status",
             "passnote -- read", "passnote --version", "passnote --post",
+            "passnote subscribers", "passnote digest-x", "passnote subscribe-x",
         ]
         for command in denied:
             with self.subTest(deny=command):

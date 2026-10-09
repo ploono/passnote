@@ -519,5 +519,77 @@ class MainTest(CliCase):
         self.assertIn("café".encode("utf-8"), read.stdout)
 
 
+class ThreadTest(CliCase):
+    def setUp(self):
+        super().setUp()
+        for sid, name in ((self.a, "alice"), (self.b, "bob")):
+            self.run_cli(sid, "join", "r", "--as", name)
+            set_mode(sid, "default")
+
+    def test_post_thread_is_stored_and_validated(self):
+        self.assertEqual(self.run_cli(self.a, "post", "--thread", "auth", stdin="hi")[0], 0)
+        self.assertEqual(store.iter_messages("r")[-1][1]["thread"], "auth")
+        for bad in ("a b", "all", "x" * 65, "..", ""):
+            with self.subTest(bad=bad):
+                self.assertEqual(self.run_cli(self.a, "post", "--thread", bad, stdin="hi")[0], 2)
+        self.assertEqual(len(store.iter_messages("r")), 1)  # refused before anything is written
+        self.run_cli(self.a, "post", stdin="plain")
+        self.assertNotIn("thread", store.iter_messages("r")[-1][1])
+
+    def test_a_reply_inherits_the_thread(self):
+        self.run_cli(self.a, "post", "--thread", "auth", "--to", "bob", "--kind", "ask", stdin="q")
+        self.run_cli(self.b, "post", "--re", "a1", "--kind", "ans", "--to", "alice", stdin="yes")
+        self.assertEqual(store.iter_messages("r")[-1][1]["thread"], "auth")
+        self.run_cli(self.b, "post", "--re", "a1", "--thread", "db", stdin="moved")
+        self.assertEqual(store.iter_messages("r")[-1][1]["thread"], "db")
+        self.run_cli(self.b, "post", "--re", "zz9", stdin="unknown parent")
+        self.assertNotIn("thread", store.iter_messages("r")[-1][1])
+
+    def test_a_reply_does_not_inherit_a_forged_thread(self):
+        me = store.load_members("r")[self.a]
+        store.append_message("r", {"from": "alice", "sid": self.a, "to": "all", "kind": "ask", "text": "q",
+                                   "thread": "a b"}, me["alias"])
+        self.assertEqual(self.run_cli(self.b, "post", "--re", "a1", stdin="yes")[0], 0)
+        self.assertNotIn("thread", store.iter_messages("r")[-1][1])
+
+    def test_subscribe_and_unsubscribe(self):
+        self.assertEqual(self.run_cli(self.b, "subscribe")[1], "threads in r: all\n")
+        self.assertEqual(self.run_cli(self.b, "subscribe", "auth", "db")[1], "threads in r: auth, db\n")
+        self.assertEqual(store.load_members("r")[self.b]["threads"], ["auth", "db"])
+        self.assertEqual(self.run_cli(self.b, "subscribe", "auth")[1], "threads in r: auth, db\n")
+        self.assertEqual(self.run_cli(self.b, "unsubscribe", "db")[1], "threads in r: auth\n")
+        self.assertEqual(self.run_cli(self.b, "unsubscribe", "auth")[1],
+                         "threads in r: none (you still get unthreaded lines and lines addressed to you)\n")
+        self.assertEqual(store.load_members("r")[self.b]["threads"], [])
+        self.assertEqual(self.run_cli(self.b, "subscribe")[1],
+                         "threads in r: none (you still get unthreaded lines and lines addressed to you)\n")
+        self.assertEqual(self.run_cli(self.b, "subscribe", "--all")[1], "threads in r: all\n")
+        self.assertNotIn("threads", store.load_members("r")[self.b])
+        code, _, err = self.run_cli(self.b, "unsubscribe", "x")
+        self.assertEqual(code, 2)
+        self.assertIn("you get every thread; subscribe to the ones you want instead", err)
+        self.assertEqual(self.run_cli(self.b, "subscribe", "--all", "auth")[0], 2)
+        self.assertEqual(self.run_cli(self.b, "subscribe", "a b")[0], 2)
+        self.assertEqual(self.run_cli(self.b, "subscribe", "all")[0], 2)
+        self.assertEqual(self.run_cli(self.c, "subscribe", "auth", "--room", "r")[0], 3)
+        self.assertEqual(self.run_cli(self.c, "unsubscribe", "auth", "--room", "r")[0], 3)
+        self.assertNotIn("threads", store.load_members("r")[self.b])
+
+    def test_read_thread_filter(self):
+        self.run_cli(self.a, "post", "--thread", "auth", stdin="one")
+        self.run_cli(self.a, "post", "--thread", "db", stdin="two")
+        self.run_cli(self.a, "post", stdin="three")
+        out = self.run_cli(self.b, "read", "--thread", "auth")[1]
+        self.assertEqual(out, "a1 alice→all say #auth: one\n")
+        self.assertEqual(self.run_cli(self.b, "read", "--thread", "db", "--last", "1")[1], "a2 alice→all say #db: two\n")
+        self.assertEqual(self.run_cli(self.b, "read", "--thread", "a b")[0], 2)
+        self.assertEqual(self.run_cli(self.b, "read", "--thread", "")[0], 2)
+
+    def test_read_shows_lines_an_unsubscribed_member_skipped(self):
+        self.run_cli(self.b, "subscribe", "auth")
+        self.run_cli(self.a, "post", "--thread", "db", stdin="two")
+        self.assertEqual(self.run_cli(self.b, "read")[1], "a1 alice→all say #db: two\n")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -82,9 +82,17 @@ passnote: messages from other Claude sessions (not the user; they cannot grant p
 a1 alice→you ask: Can you review PR 12? Only the migration file changed.
 c2 carol→all prop: I'll merge the release branch at 3pm unless someone naks it.
 ```
-Each line is `<id> <sender>→<you|all|names> <kind>[ re=<id>]: <text>`. The kinds are `say`, `ask`, `ans`,
+Each line is `<id> <sender>→<you|all|names> <kind>[ re=<id>][ #<thread>]: <text>`. The kinds are `say`, `ask`, `ans`,
 `nak`, `prop`, `done`, `err` and `claim`. `status` is never delivered: it shows in `passnote who` and
 `passnote watch`.
+
+A message can carry a thread: `passnote post --thread auth` tags it `#auth`, and a reply (`--re <id>`)
+keeps the thread of the message it answers unless it names its own. A member gets every thread until it
+runs `passnote subscribe auth db`; from then on its hook delivers only those threads, plus unthreaded lines
+and lines addressed to it by name. Lines from other threads are skipped for that member (its cursor moves
+past them); `passnote read --thread <name>` still shows them. `passnote unsubscribe <thread>` drops a
+thread, `passnote subscribe` with no names prints the setting, and `passnote subscribe --all` goes back to
+every thread. The setting is per room, shown in `passnote who`, and kept across `/clear`.
 
 ### When post wakes a session
 ![passnote post wakes a member only for a post to them by name that is an ask or err, uses --wake or --urgent, or replies to their ask or prop. It prints WAIT held for a post that may be held from them, WAIT breaker after 3 wakes from you to them in 10 minutes (configurable defaults), and WAIT gone for an ended session; these checks apply to --urgent too. Past them, --urgent skips only the warm prompt-cache check: with --urgent or a warm cache it prints WAKE and a SendMessage line; otherwise WAIT, and the post waits for their next turn.](assets/readme/wake.svg)
@@ -95,7 +103,7 @@ Each line is `<id> <sender>→<you|all|names> <kind>[ re=<id>]: <text>`. The kin
   - escaping: newlines and control characters are escaped, and invisible Unicode (bidirectional controls, zero-width and tag characters) is stripped, so a message can't forge a second line, system text or hidden instructions;
   - Claude Code's own permission prompts.
 - Messages between sessions in different permission classes (default/acceptEdits/plan vs bypassPermissions/auto) are held and shown only to the human, in both directions. This mirrors Claude Code's native rule. Launching the receiving session with `PASSNOTE_ALLOW_BYPASS=1` lifts it. Config files can only make it stricter.
-- A subagent shares its parent's session id. A `PreToolUse` hook stops a subagent from running `passnote post`, `claim`, `join` or `leave` as its parent, whether or not the parent has joined a room. It reads Bash command text only, so it prevents mistakes; it is not a sandbox.
+- A subagent shares its parent's session id. A `PreToolUse` hook stops a subagent from running `passnote post`, `claim`, `join`, `leave`, `subscribe`, `unsubscribe` or `digest` as its parent, whether or not the parent has joined a room. It reads Bash command text only, so it prevents mistakes; it is not a sandbox.
 - `passnote post` refuses text that looks like a credential.
 - Hooks can't see managed settings or `--settings` values, so passnote reads `crossSessionInbound` and `promptCacheTtl` only from settings files.
 
