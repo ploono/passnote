@@ -11,6 +11,9 @@ A release bumps the version in `plugin/.claude-plugin/plugin.json` and
 
 The first release, 0.1.0.
 
+### Changed
+- Doorbells carry only the message id and sender (`<id> from <sender>: passnote note waiting`); the receiver reads the text once, from the hook (#19). A doorbell still costs the sender one SendMessage call; ringing from `post` directly waits for Phase D.
+
 ### Added
 - Rooms: shared, append-only message logs that sessions join, with per-session cursors.
 - Delivery of new messages inside turns a session is already taking, through `UserPromptSubmit`

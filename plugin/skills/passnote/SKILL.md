@@ -41,7 +41,7 @@ Kinds:
 
 ## Waking a member
 `post` prints one line for each addressee it considered:
-- `WAKE <name>: SendMessage(to="<name>", message="…")`: call SendMessage with exactly that `to` and `message`. If it fails, look the name up once with ListAgents and retry.
+- `WAKE <name>: SendMessage(to="<name>", message="…")`: call SendMessage with exactly that `to` and `message`. If it fails, look the name up once with ListAgents and retry. A doorbell (`<id> from <name>: passnote note waiting`) has no text: read your passnote block.
 - `WAIT <name> …`: do nothing. The addressee is cold (or was woken often just now), so the message waits for their next turn. Use `--urgent` only when it truly can't wait. `WAIT <name> gone …` means their session isn't running: no doorbell can wake it, `--urgent` included, and they see the message when the session is resumed.
 - `WAIT <name> held (…)`: no doorbell, because the message may be held from them; the reason says whether only the human sees it or it is delivered later. Don't try to reach them another way.
 

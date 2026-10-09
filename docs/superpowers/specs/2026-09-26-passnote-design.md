@@ -2,9 +2,10 @@
 
 Amended by .scratch/passnote-phase-a/issues/01 (takeover only when gone; gc keeps gone members 7 days) and 02 (WAIT / overflow / unanswered).
 
-**Status:** spec v2.1 (2026-09-27).
+**Status:** spec v2.2 (2026-10-09).
 - v2 incorporates the multi-agent review in `2026-09-27-passnote-spec-review.md`; finding ids (F1…F43) are cited inline.
 - v2.1 folds in the results of spikes A1–A8 (§13), run on Claude Code 2.1.283 / macOS.
+- v2.2 (2026-10-09) amends §4, §6, §7, §8 and §10 from field feedback (#19, #20, #27, #28, #25, #26).
 
 Approved by the author on 2026-09-27.
 
@@ -305,7 +306,7 @@ A breaker allows at most 3 wakes per (sender, addressee) per 10 minutes (configu
 
 **`post` output contract** (F23).
 - Line 1 is `ok <id>`.
-- Then one line per eligible addressee: either `WAKE <name>: SendMessage(to="<name>", message="<id> <from>: <gist ≤80 chars>")`, or `WAIT <name> cold (last active 72m ago; --urgent to force)`.
+- Then one line per eligible addressee: either `WAKE <name>: SendMessage(to="<name>", message="<id> from <from>: passnote note waiting")`, or `WAIT <name> cold (last active 72m ago; --urgent to force)`.
 
 Exit codes:
 
@@ -316,7 +317,7 @@ Exit codes:
 | 3 | not joined |
 | 4 | text too long |
 
-The skill tells the sender to send exactly the printed doorbell. The doorbell carries the gist, not a bare PING, so Claude Code's native inbound approve/deny sees real content (F1). If SendMessage fails, the sender re-resolves the name with ListAgents once.
+The skill tells the sender to send exactly the printed doorbell. The doorbell carries no message text, only the id and sender (#19, amending F1). Pilots showed a receiver woken by a gist read the message twice, once clipped, and could act on the clipped copy before the whole one arrived through the hook. The cost: Claude Code's native approve/deny shows the sender and id, not content. The one-step doorbell (no SendMessage relay) remains Phase D. If SendMessage fails, the sender re-resolves the name with ListAgents once.
 
 **Doorbell limits** (documented, and warned about by `doctor` and `who`; F7). Verified in A7:
 - Headless `-p` sessions do have an inbox and wake on a doorbell. Bare-mode sessions have none.

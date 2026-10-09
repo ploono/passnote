@@ -241,6 +241,8 @@ class HeadlessTest(unittest.TestCase):
         self.assertEqual([(ev["to"], ev["decision"]) for ev in wakes], [(rx, "WAKE")], self.errors())
         self.assertIn('"name":"SendMessage"', out.replace(" ", ""), "the sender never called SendMessage")
         self.assertTrue(receiver.wait_results(2, DOORBELL_TIMEOUT), "the doorbell did not wake the receiver")
+        # The doorbell carries no text (#19), so MARIGOLD reaching the receiver proves the hook
+        # delivered it on the doorbell-woken turn.
         self.assertIn("MARIGOLD", receiver.assistant_text(after_results=1), self.errors())
 
     def test_a_subagent_cannot_post_as_its_joined_parent(self):

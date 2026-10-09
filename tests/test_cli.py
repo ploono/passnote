@@ -170,7 +170,8 @@ class PostTest(CliCase):
         self.assertEqual(store.read_events("r")[-1]["decision"], "WAIT")
         sessions.touch_active(self.b)
         _, out, _ = self.run_cli(self.a, "post", "--to", "bob", "--kind", "ask", stdin="again?")
-        self.assertIn('WAKE bob: SendMessage(to="bob", message="a2 alice: again?")', out)
+        self.assertIn('WAKE bob: SendMessage(to="bob", message="a2 from alice: passnote note waiting")', out)
+        self.assertNotIn("again?", out.split("\n", 1)[1])
         self.assertEqual(store.read_events("r")[-1]["decision"], "WAKE")
 
     def assert_held_wait(self, out, why):

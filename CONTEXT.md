@@ -93,7 +93,7 @@ A message reaching a member's context during a turn that member is taking anyway
 _Avoid_: injection, push, notification
 
 **Doorbell**:
-A short SendMessage that makes an idle addressee start a turn, so a message gets delivered now.
+A short SendMessage that makes an idle addressee start a turn, so a message gets delivered now. It carries the message id and sender, never the text.
 _Avoid_: ping, nudge
 
 **Wake**:
