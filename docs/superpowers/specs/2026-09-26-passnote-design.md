@@ -255,7 +255,7 @@ Readers open the file in binary mode and split on `b"\n"` only.
    - Cap the bytes read per fire at 256 KB.
    - Known limit (#9): a log deleted by hand and recreated is still deduped by the old `seq`. If it grows past a member's cursor seq before that member's next fire, the new messages at or below that seq are never delivered to it. passnote never deletes a log. A fix needs a log identity in the room meta and in every cursor (a format change), so it is deferred.
 5. Filter out:
-   - my own lines: my session id, or an earlier one from before a `/clear` (`prev_sids` in `members.json`; a `prev_sid` that names another current member counts as theirs);
+   - my own lines: my session id, or an earlier one from before a `/clear` (`prev_sids` in `members.json`; a `prev_sid` that names another current member counts as theirs. The cost of trusting `prev_sids`: a forged `prev_sid` naming a departed sender hides that sender's lines from this reader (its `read` shows them) and tracks that sender's asks/props for seen receipts; it never affects a current member's lines, and adds no new exposure);
    - lines whose `to` excludes me;
    - `status` lines;
    - held messages (§9);

@@ -106,7 +106,7 @@ Each issue and each #31 bullet, with the outcome and the task that owns it. "Clo
 Real design choices, each with its reason. A reviewer should check the code against these.
 
 1. **#6 trusts members.json `prev_sids`, as the issue proposes, for "is this my own line".** `render` and `fold` already trust it for display and claims, and it covers sessions cleared before this release.
-   - The cost: a forged `prev_sids` entry in the reader's own entry, naming a sender who is no longer a member, hides that sender's lines from that reader. A current member is never affected, because `store.member_for_sid` prefers a member's own key.
+   - The cost: a forged `prev_sids` entry in the reader's own entry, naming a sender who is no longer a member, hides that sender's lines from that reader. The same forged entry also makes that reader's hook track the departed sender's addressed asks/props for seen receipts. That adds no exposure: any member can already append a raw line carrying the reader's current sid, and a receipt still needs the addressee's delivery evidence. A current member is never affected, because `store.member_for_sid` prefers a member's own key.
    - A line from an earlier sid of mine is shown by `read` like one from my current sid, without the hold check. `who` already does this today. A hold check there would hide the session's own posts, which #6 says must not happen:
      - after a permission-class switch before the `/clear` (the stamp is the old class);
      - for a post stamped `"unknown"` (its fallback, the old session's recorded mode, is gone after the carry).
