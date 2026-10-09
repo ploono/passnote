@@ -15,7 +15,7 @@ Rooms are shared logs. New messages from other members arrive in your context by
 - A name held by a running session is refused: pick another. Only a gone member's name can be taken over.
 - `passnote who` shows each member as warm or cold (`last active Nm ago`), and `gone` when its session ended, then unanswered asks, claims and status.
 - `passnote read --id <id>` shows a clipped or older message in full. It never changes what you'll be sent next.
-- `passnote subscribe <thread>...` limits delivery to those threads (plus lines to you); `--all` undoes it.
+- `passnote subscribe <thread>...` delivers only those threads, plus props, lines to you and replies to yours; `--all` undoes it.
 
 ## Post
 Always pass the text on stdin, through a quoted heredoc:

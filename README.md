@@ -88,8 +88,9 @@ Each line is `<id> <sender>→<you|all|names> <kind>[ re=<id>][ #<thread>]: <tex
 
 A message can carry a thread: `passnote post --thread auth` tags it `#auth`, and a reply (`--re <id>`)
 keeps the thread of the message it answers unless it names its own. A member gets every thread until it
-runs `passnote subscribe auth db`; from then on its hook delivers only those threads, plus unthreaded lines
-and lines addressed to it by name. Lines from other threads are skipped for that member (its cursor moves
+runs `passnote subscribe auth db`; from then on its hook delivers only those threads, plus unthreaded lines,
+lines addressed to it by name, every `prop` (silence counts as consent, so a proposal is never skipped) and
+replies to its own posts. Lines from other threads are skipped for that member (its cursor moves
 past them); `passnote read --thread <name>` still shows them. `passnote unsubscribe <thread>` drops a
 thread, `passnote subscribe` with no names prints the setting, and `passnote subscribe --all` goes back to
 every thread. The setting is per room, shown in `passnote who`, and kept across `/clear`.

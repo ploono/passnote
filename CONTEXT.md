@@ -95,7 +95,7 @@ A name a message can carry, so members can follow some lines of a room and not o
 _Avoid_: topic, channel, sub-room
 
 **Subscription**:
-The threads a member chose to receive. Without one, a member gets every thread; with one, it still gets unthreaded lines and lines addressed to it.
+The threads a member chose to receive. Without one, a member gets every thread; with one, it still gets unthreaded lines, proposals, replies to its own messages and lines addressed to it.
 
 ## Delivery and trust
 

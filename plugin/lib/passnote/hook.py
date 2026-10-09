@@ -27,6 +27,8 @@ RECEIPT_MAX_AGE = 86400  # seconds
 RECEIPTS_PER_FIRE = 6
 # Delivery evidence a session keeps: the addressed asks and props it delivered to its model.
 MAX_DELIVERED = 64
+# The seq part of a message id (alias + seq): a reply's `re` is one of my posts when it is my alias + this.
+_SEQ_DIGITS = re.compile(r"[0-9]+")
 
 
 def main(event, stdin_text, env=None) -> str:
@@ -239,11 +241,23 @@ class _Fire:
             threads, _ = self.prefs(room)
             thread = render.thread_of(msg)
             if (threads is not None and thread is not None and thread not in threads
-                    and not render.addressed_by_name(msg, me)):
+                    and not self.always_arrives(room, msg, me)):
                 # An unsubscribed thread (#25): done for this member. The cursor passes it, it is
                 # never emitted, so it is never delivery evidence; `read --thread` still shows it.
                 return "skip", None
         return action, reason
+
+    def always_arrives(self, room, msg, me) -> bool:
+        """Lines no subscription filters out (#25): those addressed to me by name; every prop, since
+        silence counts as consent once the cursor passes it; and replies to my own posts (a broadcast
+        reply inherits its parent's thread). My alias comes from the members.json this fire already
+        read. A forged `re` only delivers more."""
+        if msg.get("kind") == "prop" or render.addressed_by_name(msg, me):
+            return True
+        alias = self.room(room)[0].get(self.sid, {}).get("alias")
+        parent = msg.get("re")
+        return (isinstance(alias, str) and bool(alias) and isinstance(parent, str) and parent.startswith(alias)
+                and bool(_SEQ_DIGITS.fullmatch(parent[len(alias):])))
 
     def deliver(self, room, msg, ref, redeliver=False):
         members, display, _, me = self.room(room)

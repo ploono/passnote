@@ -1111,6 +1111,34 @@ class ThreadDeliverTest(DeliverCase):
         self.assertTrue({"a5", "a6"} <= seen)
         self.assertIn("a5 alice→all say: odd", "\n".join(contexts))
 
+    def test_a_threaded_broadcast_prop_always_arrives(self):
+        """Silence counts as consent once the cursor passes a prop, so no subscription may skip one."""
+        rooms.set_prefs(self.b, "r", threads=["auth"])
+        post(self.a, "r", "ship db at 3", thread="db", kind="prop")
+        seen, contexts = self.drain(self.b)
+        self.assertEqual(seen, {"a1", "a3", "a4", "a5"})
+        self.assertIn("a5 alice→all prop #db: ship db at 3", "\n".join(contexts))
+
+    def test_replies_to_my_own_posts_always_arrive(self):
+        """A broadcast reply inherits its parent's thread; the author still gets it, unsubscribed."""
+        post(self.a, "r", "ship release at 3", thread="release", kind="prop")
+        rooms.set_prefs(self.a, "r", threads=[])
+        post(self.b, "r", "yes", thread="db", kind="ans", re="a4")
+        post(self.b, "r", "no", thread="release", kind="nak", re="a5")
+        post(self.b, "r", "other db talk", thread="db")
+        post(self.b, "r", "reply to someone else", thread="db", kind="ans", re="b8")
+        post(self.b, "r", "alias prefix only", thread="db", kind="ans", re="ab5")
+        self.assertEqual(self.drain(self.a)[0], {"b6", "b7"})
+
+    def test_a_non_str_thread_is_delivered(self):
+        rooms.set_prefs(self.b, "r", threads=["auth"])
+        post(self.a, "r", "odd int", thread=5)
+        post(self.a, "r", "odd list", thread=["auth"])
+        seen, contexts = self.drain(self.b)
+        self.assertTrue({"a5", "a6"} <= seen)
+        self.assertIn("a5 alice→all say: odd int", "\n".join(contexts))
+        self.assertIn("a6 alice→all say: odd list", "\n".join(contexts))
+
     def test_a_skipped_line_is_never_emitted_or_evidence(self):
         """A line skipped for the subscription is never shown and never delivery evidence; the
         addressed ask in the unsubscribed thread arrives and yields its receipt."""

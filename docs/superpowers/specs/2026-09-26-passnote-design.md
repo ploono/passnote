@@ -9,7 +9,7 @@ Amended by .scratch/passnote-phase-a/issues/01 (takeover only when gone; gc keep
   - #20 (§7 step 6, §10): a message addressed to the receiver by name is clipped at 1,500 characters (`clip_addressed_chars`), not 600.
   - #27 (§4, §6, §7 step 6, §8, §10): a post over `text_max_chars` keeps its first 4,000 characters in the log and its whole text in a full-text file, `rooms/<room>/files/<id>.txt`; delivery shows the file's path. Posts over `full_text_max_chars` (100,000) are refused.
   - #28 (§6, §7): seen receipts. A sender's next turn shows `passnote: seen by <name>: <id>` once an addressee's turn has delivered its addressed `ask` or `prop`. The sender's own hook works this out from the delivery evidence the addressee's hook keeps; no message is sent.
-  - #25 (§4, §6, §7 step 5, §10): threads. A message may carry `thread` (`post --thread <name>`; a reply inherits its ask's thread). A member with a subscription (`subscribe`/`unsubscribe`, stored as `threads` on its `members.json` entry) is delivered only its threads, plus unthreaded lines and lines addressed to it by name.
+  - #25 (§4, §6, §7 step 5, §10): threads. A message may carry `thread` (`post --thread <name>`; a reply inherits its ask's thread). A member with a subscription (`subscribe`/`unsubscribe`, stored as `threads` on its `members.json` entry) is delivered only its threads, plus unthreaded lines, props, replies to its own posts and lines addressed to it by name.
 
 Approved by the author on 2026-09-27.
 
@@ -196,7 +196,7 @@ After clear, resume and compact, the hook injects one line: `passnote: you are <
 - `id`: the member's alias (`[a-z]+`, unique per room, never reused; `w` is reserved) followed by `seq` (F38).
 - `to`: `"all"` or a list of names.
 - `text`: capped at 4,000 characters in the log; a longer post (up to `full_text_max_chars`, 100,000) stores its first 4,000 plus `full_chars`, and its whole text in `files/<id>.txt`, written under the room lock before the log line. The path is derived from room and id, never stored (#27). The secret guard scans the whole text first. A larger text goes in a file the sender writes, and the message carries its path (F14, F43).
-- `thread` (optional, #25): a name, validated at post time like a member name (`[A-Za-z0-9._-]{1,64}`, not `.`/`..`, not reserved, so `all` is refused). `post --re <id>` without `--thread` takes the thread of message `<id>` when the log holds it with a valid thread. A `thread` that is not a string makes the line invalid; a string that is not a valid name counts as unthreaded (delivered to everyone, rendered without `#`), so a forged value never hides a line.
+- `thread` (optional, #25): a name, validated at post time like a member name (`[A-Za-z0-9._-]{1,64}`, not `.`/`..`, not reserved, so `all` is refused). `post --re <id>` without `--thread` takes the thread of message `<id>` when the log holds it with a valid thread. `thread` is never a reason to reject a line: any value that is not a valid name (a string or not) counts as unthreaded (delivered to everyone, rendered without `#`), so a forged value never hides a line.
 
 **Kinds.** Unknown kinds are rejected at post time (F22).
 
@@ -248,7 +248,7 @@ Readers open the file in binary mode and split on `b"\n"` only.
    - lines whose `to` excludes me;
    - `status` lines;
    - held messages (§9);
-   - lines of a thread the member is not subscribed to (#25). A member's `threads` list in `members.json` (already read this fire, so no extra I/O) limits delivery to those threads; unthreaded lines and lines addressed to it by name always pass. Absent means every thread; `[]` means none. A value that is not a list of valid names means every thread. A skipped line still moves the cursor and is never emitted, so it is never delivery evidence for a seen receipt; `read --thread` shows it.
+   - lines of a thread the member is not subscribed to (#25). A member's `threads` list in `members.json` (already read this fire, so no extra I/O) limits delivery to those threads. Always passing: unthreaded lines; lines addressed to it by name; every `prop`, because silence counts as consent once the cursor passes it; and replies to its own posts (`re` is its alias followed by digits, from the same `members.json`), because a broadcast reply inherits its parent's thread. A forged `re` only delivers more. Absent means every thread; `[]` means none. A value that is not a list of valid names means every thread. A skipped line still moves the cursor and is never emitted, so it is never delivery evidence for a seen receipt; `read --thread` shows it.
 6. Render into **one budget of 2,000 characters per invocation**, across all rooms, in this order:
    1. addressed `ask`, `err`, and messages posted with `--wake`;
    2. other addressed messages;
@@ -386,7 +386,7 @@ All commands take `--room`. The room is resolved as follows: the explicit `--roo
 | `post [--to a,b] [--kind k] [--re id] [--thread name] [--wake\|--urgent]` | Post a message. Text is read from stdin; the skill uses a quoted heredoc, so the shell doesn't expand it. A reply without `--thread` keeps its ask's thread |
 | `claim "<what>"` / `claim --release <id>` | Claim work or release a claim |
 | `read [--id x \| --since id \| --last N] [--thread name]` | Filtered read that never moves the cursor. `--since` is exclusive. `--thread` filters first, and shows lines a subscription skipped |
-| `subscribe [thread ...] [--all]` | Receive only these threads (plus unthreaded and addressed lines); `--all` removes the filter; no arguments prints the setting (#25) |
+| `subscribe [thread ...] [--all]` | Receive only these threads (plus unthreaded lines, props, replies to your posts and addressed lines); `--all` removes the filter; no arguments prints the setting (#25) |
 | `unsubscribe thread ...` | Drop threads from the subscription; refused when there is none (#25) |
 | `who` | Members, warm or cold, name and permission mode, thread subscription, last error, pending addressed messages, claims, whether props were seen |
 | `watch [room \| --all]` | Live colored view of messages, holds, wake decisions and pending items |

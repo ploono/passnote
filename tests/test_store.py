@@ -394,7 +394,6 @@ class ValidMessageTest(HomeCase):
             ("mode", 123), ("mode", ["default"]),
             ("wake", None), ("wake", "yes"), ("wake", 1),
             ("ts", True), ("ts", "1234"),
-            ("thread", 5), ("thread", ["a"]), ("thread", True), ("thread", {"a": 1}),
         ]
         for field, value in cases:
             with self.subTest(field=field, value="<absent>" if value is ABSENT else value):
@@ -414,6 +413,8 @@ class ValidMessageTest(HomeCase):
             ("full_chars", [1]), ("full_chars", {"n": 1}),
             # A str thread that isn't a valid name stays valid: render counts it as unthreaded.
             ("thread", ABSENT), ("thread", None), ("thread", "auth"), ("thread", "a b"), ("thread", ""),
+            # A forged thread of any type fails open: the line stays valid and counts as unthreaded.
+            ("thread", 5), ("thread", ["a"]), ("thread", True), ("thread", {"a": 1}),
         ]
         for field, value in cases:
             with self.subTest(field=field, value="<absent>" if value is ABSENT else value):
