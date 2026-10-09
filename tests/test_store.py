@@ -452,6 +452,14 @@ class FullTextTest(HomeCase):
                 self.assertIsNone(store.full_text_path("r", forged))
         self.assertTrue(store.full_text_path("r", "b12").endswith(os.path.join("rooms", "r", "files", "b12.txt")))
 
+    def test_every_alias_shape_gets_a_path(self):
+        from passnote import rooms
+        long_name = "z" * 64
+        for name, used in (("Алиса", set()), ("42-._", set()), ("bob", {"b", "bo", "bob"}),
+                           (long_name, {long_name[:n] for n in range(1, 65)} | {long_name + "a"})):
+            with self.subTest(name=name):
+                self.assertIsNotNone(store.full_text_path("r", rooms._alias(name, used) + str(10 ** 17)))
+
     def test_a_huge_cjk_post_keeps_a_readable_log_line(self):
         msg = store.append_message("r", dict(self.rec, text="漢" * 4000), "a", full_text="漢" * 100000)
         with open(store.log_path("r"), "rb") as fh:
