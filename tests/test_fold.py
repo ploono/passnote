@@ -16,6 +16,12 @@ def m(seq, sender, kind, text="t", to="all", re=None):
 
 
 class FoldTest(unittest.TestCase):
+    def test_passed(self):
+        self.assertTrue(fold.passed(3, {"seq": 3}))
+        self.assertFalse(fold.passed(4, {"seq": 3}))
+        for cur in (None, {}, {"seq": "9"}, {"seq": True}):
+            self.assertFalse(fold.passed(1, cur))
+
     def test_unanswered_until_each_addressee_replies(self):
         msgs = [m(1, "alice", "ask", to=["bob", "carol"]), m(2, "bob", "ans", re="a1", to=["alice"]),
                 m(3, "alice", "ask", to="all"), m(4, "carol", "err", to=["bob"])]

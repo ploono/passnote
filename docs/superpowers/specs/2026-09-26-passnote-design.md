@@ -8,6 +8,7 @@ Amended by .scratch/passnote-phase-a/issues/01 (takeover only when gone; gc keep
 - v2.2 (2026-10-09) amends §4, §6, §7, §8 and §10 from field feedback (#19, #20, #27, #28, #25, #26).
   - #20 (§7 step 6, §10): a message addressed to the receiver by name is clipped at 1,500 characters (`clip_addressed_chars`), not 600.
   - #27 (§4, §6, §7 step 6, §8, §10): a post over `text_max_chars` keeps its first 4,000 characters in the log and its whole text in a full-text file, `rooms/<room>/files/<id>.txt`; delivery shows the file's path. Posts over `full_text_max_chars` (100,000) are refused.
+  - #28 (§6, §7): seen receipts. A sender's next turn shows `passnote: seen by <name>: <id>` once an addressee's turn has delivered its addressed `ask` or `prop`. The sender's own hook works this out from the addressee's cursor; no message is sent.
 
 Approved by the author on 2026-09-27.
 
@@ -203,7 +204,7 @@ After clear, resume and compact, the hook injects one line: `passnote: you are <
 | `ask` | yes | a reply is expected |
 | `ans` | yes | an answer, with `re` |
 | `nak` | yes | a rejection of a `prop` or `ask`, with `re` |
-| `prop` | yes | the sender will act on this default. Silence counts as consent only after the addressee's cursor has passed it; `who` shows "seen" |
+| `prop` | yes | the sender will act on this default. Silence counts as consent only after the addressee's cursor has passed it; `who` shows "seen", and the sender's next turn shows a seen receipt (§7) |
 | `done` | yes | the task is complete, with `re` |
 | `err` | yes | failed or blocked |
 | `claim` | yes | "I'm doing X", to avoid duplicate work. Released by `claim --release <id>` or on leave (F17) |
@@ -275,6 +276,15 @@ Escaping is **a security control, not cosmetics** (A4). A raw newline let a forg
 - On the next fire it scans the last 256 KB of `transcript_path` for those ids inside a `hook_additional_context` record. Any id not found is re-rendered first.
 - The transcript format is internal. If the transcript can't be read or parsed, the check is skipped and the hook logs that once.
 - Losses after a confirmed delivery (compaction, /rewind) are ordinary context loss. SessionStart re-surfaces pending addressed messages.
+
+**Seen receipts (#28).** The sender's own hook tells its model when an addressee's turn has delivered the sender's `ask` or `prop` addressed by name (other kinds and broadcasts get none). No message is sent and `post` writes nothing for it.
+- When the sender's cursor passes its own addressed `ask` or `prop`, the hook records a pending receipt in `emit.json` (room, id, seq, ts, mode and the first 4 names of `to`, the sender excluded). Only the hook writes that state, under the session `.lock`.
+- "Seen" for (message, addressee) is `fold`'s prop rule, `fold.passed`: the addressee's cursor seq is at or past the message's. The message must also not be in the addressee's emit `overflow` (the cursor passes overflowed lines before they are rendered); an entry in their emit `ahead` counts as seen, since it was delivered ahead of the cursor.
+- A held message is never reported seen. The sender's mode is checked against the addressee's recorded mode, fail-closed (the addressee's `PASSNOTE_ALLOW_BYPASS` is invisible here), and any `hold` event for that id and any sid the addressee had (its current one or its `prev_sids`) counts. A held, departed or invalid-sid addressee is dropped for good, never reported.
+- Bounds: at most 16 pending messages (the oldest are dropped), 4 addressees each, 24 hours (older entries are dropped unreported), and 6 (message, name) pairs shown per fire; the rest are shown next fire. With nothing pending, a fire does no extra I/O.
+- Output: one line, `passnote: seen by bob: a12, a14; by carol: a12`, grouped by name. Only valid member names and ids of the full-text id shape appear, so the line is ASCII; it is at most 300 characters, and a pair it has no room for is shown next fire. It ends `additionalContext`, counted inside its 6,500-byte cap and the character budget; with no messages, it is the whole context, with no header.
+- It is not added to the systemMessage, so the 8 KB arithmetic (6,500 + 1,000) is unchanged; the human sees "seen" in `passnote who`. A receipt is never recorded for transcript confirmation: a lost one is not redelivered, so each is shown at most once.
+- Known gap: asks posted before a `/clear` carry the old session id, so the new session doesn't track them. Pending receipts already recorded are carried over.
 
 **Errors.**
 - The hook always exits 0 and logs errors to `errors.log`.

@@ -34,6 +34,14 @@ class LifecycleTest(HomeCase):
         post(self.a, "r", "after clear")
         self.assertIn("after clear", hook.main("PostToolBatch", hook_input(new), self.env(new)))
 
+    def test_pending_receipts_survive_clear(self):
+        # alice (self.a) has a pending receipt; a /clear carries it to the new sid
+        post(self.a, "r", "q", kind="ask", to=["bob"])
+        hook.main("PostToolBatch", hook_input(self.a), self.env(self.a))
+        new = new_sid()
+        rooms.carry_over(self.a, new)
+        self.assertEqual([entry["id"] for entry in sessions.load_emit(new)["receipts"]], ["a1"])
+
     def test_reminder_lists_at_most_five_rooms(self):
         for i in range(2, 9):
             join(self.b, f"r{i}", "bob")

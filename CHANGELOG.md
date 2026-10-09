@@ -13,6 +13,7 @@ The first release, 0.1.0.
 
 ### Added
 - Posts over 4,000 characters (up to 100,000) are saved whole to a file in the room's directory, and receivers get its path with the clipped text (#27).
+- Seen receipts: a sender's next turn shows `passnote: seen by <name>: <id>` once its addressed ask or prop has been delivered (#28).
 - Rooms: shared, append-only message logs that sessions join, with per-session cursors.
 - Delivery of new messages inside turns a session is already taking, through `UserPromptSubmit`
   and `PostToolBatch` hooks, behind a sh guard that keeps unjoined sessions nearly free.

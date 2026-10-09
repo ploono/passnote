@@ -251,9 +251,9 @@ def carry_over(old_sid, new_sid) -> None:
 
 def _carry_emit(old_sid, new_sid, old_meta) -> None:
     """Move the delivery hook's emit state. Overflow and ahead refs are already behind the cursor:
-    without them a /clear would lose those messages. Emitted refs are checked against the OLD
-    transcript (the new one is a different file): the unconfirmed ones are carried as overflow,
-    to be rendered again; an unreadable transcript confirms nothing."""
+    without them a /clear would lose those messages. Pending seen receipts come along too. Emitted
+    refs are checked against the OLD transcript (the new one is a different file): the unconfirmed
+    ones are carried as overflow, to be rendered again; an unreadable transcript confirms nothing."""
     old_emit, new_emit = sessions.load_emit(old_sid), sessions.load_emit(new_sid)
     if not any(old_emit.values()):
         return
@@ -274,7 +274,8 @@ def _carry_emit(old_sid, new_sid, old_meta) -> None:
         return out
 
     sessions.save_emit(new_sid, new_emit["emitted"], merged(new_emit["overflow"], old_emit["overflow"], unconfirmed),
-                       merged(new_emit["ahead"], old_emit["ahead"]))
+                       merged(new_emit["ahead"], old_emit["ahead"]),
+                       merged(new_emit["receipts"], old_emit["receipts"]))
 
 
 def _sweep_orphan_members(result) -> None:

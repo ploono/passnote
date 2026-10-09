@@ -115,6 +115,10 @@ _Avoid_: backlog, queue, carry-over
 An ask (or err) that at least one of its addressees hasn't replied to yet. This is independent of whether it was delivered.
 _Avoid_: pending, open, outstanding
 
+**Seen receipt**:
+A line on a sender's next turn saying an addressee's turn has delivered the sender's ask or proposal. Worked out from the addressee's cursor; the addressee sends nothing.
+_Avoid_: ack, read receipt
+
 **Permission class**:
 Whether a session asks its human before acting (prompting) or doesn't (non-prompting). It is derived from the session's permission mode.
 

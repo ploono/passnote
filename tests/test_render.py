@@ -446,5 +446,62 @@ class BuildTest(unittest.TestCase):
                     self.assertIn("not shown yet", context)
 
 
+
+class ReceiptLineTest(unittest.TestCase):
+    def test_format_groups_by_name(self):
+        self.assertEqual(render.receipt_line([("bob", "a1"), ("bob", "a3"), ("carol", "a1")]),
+                         "passnote: seen by bob: a1, a3; by carol: a1")
+        self.assertIsNone(render.receipt_line([]))
+
+    def test_invalid_names_and_ids_are_dropped_and_the_line_is_bounded(self):
+        pairs = [("böb", "a1"), ("bob", "../x"), ("bob", "a2")] + [("n" * 64, f"a{i}") for i in range(50)]
+        line = render.receipt_line(pairs)
+        self.assertNotIn("ö", line)
+        self.assertNotIn("../x", line)
+        self.assertTrue(line.isascii())
+        self.assertLessEqual(len(line), render.RECEIPT_MAX_CHARS)
+
+    def test_parts_name_the_pairs_the_line_shows(self):
+        long_ids = [("bob", "a" * 72 + str(10 ** 17 + i)) for i in range(6)]  # one group over the cap
+        line, shown = render.receipt_parts(long_ids + [("böb", "a1")])
+        self.assertTrue(line.startswith("passnote: seen by bob: "))
+        self.assertLessEqual(len(line), render.RECEIPT_MAX_CHARS)
+        self.assertTrue(shown)  # a group too long for the line still shows its first pairs
+        self.assertEqual(shown, long_ids[:len(shown)])
+        self.assertLess(len(shown), len(long_ids))
+        self.assertTrue(all(msg_id in line for _, msg_id in shown))
+        self.assertEqual(render.receipt_line(shown), line)
+        self.assertEqual(render.receipt_parts([("böb", "a1")]), (None, []))
+
+    def test_build_with_only_a_tail(self):
+        self.assertEqual(render.build([], "bob", 2000, 600, tail="passnote: seen by bob: a1"),
+                         ("passnote: seen by bob: a1", [], []))
+
+    def test_tail_is_counted_inside_the_context_cap(self):
+        items = [item(msg(id=f"a{i}", seq=i, to=["bob"], kind="ask", text="漢" * 600)) for i in range(1, 40)]
+        tail = render.receipt_line([("n" * 64, f"a{i}") for i in range(1, 7)])
+        ctx, emitted, overflow = render.build(items, "bob", 2000, 600, tail=tail)
+        self.assertTrue(ctx.endswith("\n" + tail))
+        self.assertLessEqual(len(json.dumps(ctx, ensure_ascii=True)) - 2, render.MAX_CONTEXT_JSON)
+        self.assertTrue(overflow)
+        self.assertIn("not shown yet", ctx.split("\n")[-2])
+
+    def test_tail_with_one_huge_item_stays_under_the_cap(self):
+        tail = render.receipt_line([("n" * 64, "a" * 72 + str(10 ** 17 + i)) for i in range(6)])
+        items = [item(msg(id="a1", to=["bob"], kind="ask", text="\u2028" * 5000))]
+        ctx, emitted, overflow = render.build(items, "bob", 10 ** 6, 10 ** 6, tail=tail)
+        self.assertTrue(ctx.endswith("\n" + tail))
+        self.assertEqual(len(emitted), 1)
+        self.assertLessEqual(len(json.dumps(ctx, ensure_ascii=True)) - 2, render.MAX_CONTEXT_JSON)
+
+    def test_tail_counts_against_the_character_budget(self):
+        items = [item(msg(id=f"a{i}", seq=i, text="x" * 90)) for i in range(1, 4)]
+        tail = "passnote: seen by bob: a1"
+        _, emitted, _ = render.build(items, "bob", len(render.HEADER) + 2 * 109, 600)
+        self.assertEqual(len(emitted), 2)
+        _, emitted, overflow = render.build(items, "bob", len(render.HEADER) + 2 * 109, 600, tail=tail)
+        self.assertEqual((len(emitted), len(overflow)), (1, 2))
+
+
 if __name__ == "__main__":
     unittest.main()

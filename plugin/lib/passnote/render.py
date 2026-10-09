@@ -32,6 +32,8 @@ FIELD_CLIP = 64
 # system_message: how many rooms / senders-per-room to name before falling back to "+N".
 MAX_ROOMS_SHOWN = 3
 MAX_NAMES_PER_ROOM = 3
+# The seen-receipt line (#28): at most this many characters, all ASCII, so its JSON size is its length.
+RECEIPT_MAX_CHARS = 300
 # audience(): how many `to` names to list before folding the rest into "+N" (fix round 3 --
 # an unbounded list of forged names could otherwise blow a single line up on its own).
 MAX_TO_NAMES_SHOWN = 3
@@ -175,12 +177,48 @@ def _reserve_for_overflow(n_items) -> int:
     return _json_len("\n" + _overflow_stub(n_items))
 
 
-def build(items, me, budget, clip):
+def receipt_pair_ok(name, msg_id) -> bool:
+    """Whether a (name, id) pair may appear in a receipt line: a valid member name and a message id
+    of the full-text id shape. Both are ASCII and need no escaping."""
+    return paths.valid_name(name) and isinstance(msg_id, str) and bool(store.FULL_TEXT_ID_RE.fullmatch(msg_id))
+
+
+def _receipt_text(by_name) -> str:
+    return "passnote: seen " + "; ".join(f"by {name}: {', '.join(ids)}" for name, ids in by_name.items())
+
+
+def receipt_parts(pairs):
+    """(line, shown): the receipt line for (name, id) pairs, grouped by name in first-seen order,
+    and the pairs it shows. Invalid pairs are dropped. Pairs are added one at a time until the
+    next would take the line past RECEIPT_MAX_CHARS; a lone valid pair always fits, so a caller
+    that keeps the pairs not shown for later always makes progress. (None, []) when none is valid."""
+    by_name, shown = {}, []
+    for name, msg_id in pairs:
+        if not receipt_pair_ok(name, msg_id):
+            continue
+        trial = {key: list(ids) for key, ids in by_name.items()}
+        trial.setdefault(name, []).append(msg_id)
+        if len(_receipt_text(trial)) > RECEIPT_MAX_CHARS:
+            break
+        by_name = trial
+        shown.append((name, msg_id))
+    return (_receipt_text(by_name) if shown else None), shown
+
+
+def receipt_line(pairs):
+    """'passnote: seen by bob: a1, a3; by carol: a1' for (name, id) pairs, ASCII only (invalid names
+    or ids are dropped), at most RECEIPT_MAX_CHARS long; None when nothing is left."""
+    return receipt_parts(pairs)[0]
+
+
+def build(items, me, budget, clip, tail=None):
     """(context, emitted, overflow). An item's optional "me" (the receiver's name in that item's
     room) overrides `me`. Each emitted entry is a copy of its item plus "line", the exact line the
-    context holds for it, so the hook can confirm that line, not a bare id, in the transcript."""
+    context holds for it, so the hook can confirm that line, not a bare id, in the transcript.
+    `tail` (a receipt line, passnote's own text) ends the context, counted in the budget and in
+    MAX_CONTEXT_JSON; with no items it is the whole context, with no header."""
     if not items:
-        return None, [], []
+        return (tail or None), [], []
     ordered = sorted(items, key=lambda it: (0 if it.get("redeliver") else 1,
                                             priority(it["msg"], it.get("me", me)),
                                             it["msg"].get("seq", 0)))
@@ -190,6 +228,11 @@ def build(items, me, budget, clip):
     # dropped under ordinary non-ASCII traffic. n_items overflowing is a safe upper bound on the
     # actual overflow count's digit width, so the real zero-id line is always <= this reserve.
     reserve = _reserve_for_overflow(len(items))
+    # The tail is reserved the same way, before packing: it always ends the context.
+    tail_cost = _json_len("\n" + tail) if tail else 0
+    if tail:
+        reserve += tail_cost
+        budget -= len(tail) + 1
     pack_cap = MAX_CONTEXT_JSON - reserve
 
     def rendered(it, clip_val):
@@ -248,12 +291,14 @@ def build(items, me, budget, clip):
         n_ids, ov_line = 0, overflow_line(0)
         while n_ids < min(len(overflow), 20):
             candidate_line = overflow_line(n_ids + 1)
-            if size + _json_len("\n" + candidate_line) <= MAX_CONTEXT_JSON:
+            if size + _json_len("\n" + candidate_line) <= MAX_CONTEXT_JSON - tail_cost:
                 n_ids += 1
                 ov_line = candidate_line
             else:
                 break
         lines.append(ov_line)
+    if tail:
+        lines.append(tail)
     return HEADER + "\n" + "\n".join(lines), emitted, overflow
 
 

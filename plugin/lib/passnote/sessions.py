@@ -303,13 +303,16 @@ def _emit_path(sid):
 def load_emit(sid) -> dict:
     """The delivery hook's state between fires: refs it emitted last fire (to confirm against the
     transcript), refs that overflowed (rendered next fire), and refs it took ahead of its cursor
-    (addressed asks found past a full room share; the cursor skips them when it gets there)."""
+    (addressed asks found past a full room share; the cursor skips them when it gets there), and
+    pending seen receipts (this session's addressed asks and props not yet reported seen)."""
     state = paths.read_json(_emit_path(sid), {})
     if not isinstance(state, dict):
         state = {}
-    return {key: list(state.get(key) or []) for key in ("emitted", "overflow", "ahead")}
+    # Another session's hook reads this too (seen receipts): a value that isn't a list counts as empty.
+    return {key: list(state[key]) if isinstance(state.get(key), list) else []
+            for key in ("emitted", "overflow", "ahead", "receipts")}
 
 
-def save_emit(sid, emitted, overflow, ahead=()) -> None:
+def save_emit(sid, emitted, overflow, ahead=(), receipts=()) -> None:
     paths.atomic_write_json(_emit_path(sid), {"emitted": list(emitted), "overflow": list(overflow),
-                                              "ahead": list(ahead)})
+                                              "ahead": list(ahead), "receipts": list(receipts)})
