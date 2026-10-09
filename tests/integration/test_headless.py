@@ -245,19 +245,21 @@ class HeadlessTest(unittest.TestCase):
         self.assertTrue(receiver.wait_results(2, DOORBELL_TIMEOUT), "the doorbell did not wake the receiver")
         # The doorbell carries no text (#19), so the text reaches the receiver only through the hook:
         # the proof is a UserPromptSubmit attachment in its transcript, after the doorbell.
-        self.assertIn("MARIGOLD", receiver.assistant_text(after_results=1), self.errors())
         with open(os.path.join(self.home, "rooms", "it", "members.json")) as fh:
-            receiver_sid = next(sid for sid, info in json.load(fh).items() if info.get("name") == rx)
+            receiver_sid = next((sid for sid, info in json.load(fh).items() if info.get("name") == rx), None)
+        self.assertTrue(receiver_sid, "receiver not in members.json")
         with open(os.path.join(self.home, "sessions", receiver_sid, "meta.json")) as fh:
             transcript = json.load(fh).get("transcript_path")
         self.assertTrue(transcript and os.path.isfile(transcript), "the receiver's transcript path was not recorded")
         with open(transcript) as fh:
             records = [json.loads(line) for line in fh if line.strip().startswith("{")]
-        bell = [i for i, rec in enumerate(records) if "passnote note waiting" in json.dumps(rec)]
+        bell = [i for i, rec in enumerate(records) if "from alice: passnote note waiting" in json.dumps(rec)]
         self.assertTrue(bell, "no doorbell in the receiver's transcript")
         delivered = [rec for rec in records[bell[0]:] if (rec.get("attachment") or {}).get("type") == "hook_additional_context"
+                     and rec["attachment"].get("hookEvent") == "UserPromptSubmit"
                      and "MARIGOLD" in json.dumps(rec["attachment"].get("content"))]
         self.assertTrue(delivered, "the hook did not deliver MARIGOLD on the doorbell-woken turn")
+        self.assertIn("MARIGOLD", receiver.assistant_text(after_results=1), self.errors())
 
     def test_a_subagent_cannot_post_as_its_joined_parent(self):
         post = f"printf SUBAGENT-NOTE | {shlex.quote(BIN)} post"
