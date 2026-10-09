@@ -148,7 +148,19 @@ class BuildTest(unittest.TestCase):
         ctx, emitted, overflow = render.build(items, "bob", 2000, 600)
         self.assertLessEqual(len(json.dumps(ctx, ensure_ascii=True)) - 2, render.MAX_CONTEXT_JSON)
         self.assertEqual(len(emitted), 1)  # the first line shrank to fit
+        self.assertIn("passnote read --id a1", ctx)
         self.assertTrue(ctx.split("\n")[-1].startswith("… 1 not shown yet"))
+
+    def test_a_long_cyrillic_addressed_message_loses_only_what_does_not_fit(self):
+        it = dict(item(msg(to=["bob"], text="я" * 1100)), clip=1500)
+        ctx, emitted, _ = render.build([it], "bob", 2000, 600)
+        shown = ctx.count("я")
+        self.assertGreater(shown, 750)
+        self.assertLessEqual(len(json.dumps(ctx, ensure_ascii=True)) - 2, render.MAX_CONTEXT_JSON)
+        bigger = dict(it, msg=msg(to=["bob"], text="я" * 1100))
+        # one more char would not fit: the clip is the largest that does
+        line = render.render_line(bigger["msg"], "bob", MEMBERS, shown + 1)
+        self.assertGreater(len(json.dumps(render.HEADER + "\n" + line)) - 2, render.MAX_CONTEXT_JSON)
 
     def test_addressed_by_name(self):
         self.assertTrue(render.addressed_by_name(msg(to=["bob", "carol"]), "bob"))

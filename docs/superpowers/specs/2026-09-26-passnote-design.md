@@ -248,7 +248,7 @@ Readers open the file in binary mode and split on `b"\n"` only.
    2. other addressed messages;
    3. broadcasts.
 
-   A single message longer than its clip is clipped: 1,500 characters (`clip_addressed_chars`) when addressed to the receiver by name, else 600 (`clip_chars`); the larger of the two applies to addressed messages. The clipped form is `… (+N chars: passnote read --id b112)`. Messages that don't fit are listed by id on one overflow line and stay pending. An addressed message is never skipped silently.
+   A single message longer than its clip is clipped: 1,500 characters (`clip_addressed_chars`) when addressed to the receiver by name, else 600 (`clip_chars`); the larger of the two applies to addressed messages. Non-Latin text may clip earlier, because it costs more of the 8 KB hook output. The clipped form is `… (+N chars: passnote read --id b112)`. Messages that don't fit are listed by id on one overflow line and stay pending. An addressed message is never skipped silently.
 7. Emit exactly one JSON object on stdout:
    `{"hookSpecificOutput":{"hookEventName":"<event>","additionalContext":"<header>\n<lines>"},"systemMessage":"passnote[<room>]: 2 from session-b (ask b112)"}`.
    The systemMessage makes every delivery visible to the human (F26). A3 verified that it is shown to the user, never sent to the model, and costs 0 tokens.

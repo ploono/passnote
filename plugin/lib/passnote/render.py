@@ -23,6 +23,9 @@ MAX_CONTEXT_JSON = 6500
 MAX_SYSTEM_JSON = 1000
 # Floor for the always-emitted first line's clip when it must be shrunk to fit MAX_CONTEXT_JSON.
 MIN_CLIP = 40
+# Bytes the shrunk first line leaves free (when other items wait) so the overflow line can still
+# name a few ids, not just count them.
+OVERFLOW_ID_SLACK = 300
 # Every head field (names, id, re, kind, each `to` name, room display) is clipped to this many
 # characters before escaping, so no single forged field can blow a line up unboundedly.
 FIELD_CLIP = 64
@@ -187,12 +190,19 @@ def build(items, me, budget, clip):
     for it in ordered:
         if not emitted:
             # The first line is always emitted, but it must still fit pack_cap: shrink its clip
-            # (never below MIN_CLIP) until the serialized context fits, or give up.
-            cur_clip = it.get("clip", clip)
-            line = rendered(it, cur_clip)
-            while cur_clip > MIN_CLIP and size + _json_len("\n" + line) > pack_cap:
-                cur_clip = max(MIN_CLIP, cur_clip // 2)
-                line = rendered(it, cur_clip)
+            # (never below MIN_CLIP) to the largest value whose serialized context fits, or give up.
+            first_cap = pack_cap - (OVERFLOW_ID_SLACK if len(items) > 1 else 0)
+            hi = it.get("clip", clip)
+            line = rendered(it, hi)
+            if hi > MIN_CLIP and size + _json_len("\n" + line) > first_cap:
+                lo = MIN_CLIP  # lo is the best known fit (or the floor); hi is known not to fit
+                while hi - lo > 1:
+                    mid = (lo + hi) // 2
+                    if size + _json_len("\n" + rendered(it, mid)) > first_cap:
+                        hi = mid
+                    else:
+                        lo = mid
+                line = rendered(it, lo)
             lines.append(line)
             emitted.append(dict(it, line=line))
             used += 1 + len(line)
