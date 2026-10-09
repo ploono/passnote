@@ -278,7 +278,7 @@ This spec deviates in one detail: `post` also appends its own line to the local 
 ## 5. Wakes
 
 - A post never prints a WAKE line for a remote addressee: SendMessage can't cross machines.
-- A pulled line that would wake a local member (design §8 eligibility, or a wake rule) is handled by that machine's listener, if one is armed. The listener is usually the follower that pulled it, so the wake follows within its coalescing window. Without a listener, the line waits for the member's next turn.
+- A pulled line that would wake a local member (design §8 eligibility, or a wake rule) is handled by that machine's listener, if one is armed. The listener is usually the follower that pulled it, so the wake follows within its coalescing window. With no listener, and once the direct-socket doorbell exists (listeners spec §4.7, Phase L4), the sync process that pulled the line rings the member itself. Otherwise the line waits for the member's next turn.
 - The wake breaker counts per (sender, addressee), whatever the machine.
 
 ## 6. Trust and safety

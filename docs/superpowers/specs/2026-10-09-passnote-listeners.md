@@ -159,7 +159,12 @@ For workers a coordinator or a human launches to stay resident, such as a review
 ### 4.7 Direct-socket doorbell (Phase L4)
 
 - Writing to `CLAUDE_CODE_MESSAGING_SOCKET` directly. Sandboxed Bash can't reach it (A5), but hooks run unsandboxed. So `post` writes a ring request to `sessions/<sender>/ring.jsonl`, and the sender's own next `PostToolBatch` (the one that ends the `post` call) rings. The ring carries the same text-free doorbell that `post` prints (#19, merged in #32): `<id> from <sender>: passnote note waiting`. It carries no message text; the message itself arrives through the hook.
-- This removes the sender's 11–16k doorbell call for every warm wake, and lets the cross-machine sync wake a local member when no listener is armed.
+- This removes the sender's 11–16k doorbell call for every warm wake.
+- **Receiver-side ring for lines from other machines.** `ring.jsonl` is only for the local sender, whose `post` runs sandboxed. A line from another machine is rung on the *receiving* machine instead, by the sync process that appends it (cross-machine spec §4.5). That process is unsandboxed whether it is the async hook entry or a follower, so it rings the socket directly:
+  - it rings only for a local member with no live listener;
+  - it runs the same pipeline first: eligibility or a wake rule, `wake.held`, the breaker, warm/cold;
+  - the doorbell is the same text-free line.
+- **Limit.** With no follower running and no session on that machine taking a turn, nothing pulls, so nothing rings. The line waits for the member's next turn, as the cross-machine spec's `WAIT … remote` line says.
 - A **version guard** allows it only on Claude Code versions listed after D5 passed on them. Any other version, and any socket error, falls back to the printed `WAKE` line. A ring is never retried blindly.
 - **Shipped only if D5 shows** that the receiving Claude Code applies its own inbound holds and `crossSessionInbound` to a socket-written message, and stamps `from-mode` itself rather than trusting the payload. Otherwise it is dropped (Q6).
 
@@ -289,5 +294,6 @@ On macOS and Linux, on the minimum Claude Code version and the newest release. R
   - On a guarded version, a warm addressee with no listener is rung by the sender's own hook, with no sender tool call.
   - On an unknown version, `post` prints the usual `WAKE` line.
   - A message held by the receiver's native rules is not delivered through the socket.
+  - Cross-machine: a pulled ask for a warm local member with no listener is rung by the sync process that appended it, within one sync. With no sync running, nothing rings and the line waits for the member's next turn.
 
 **Phase L5: `(mode?)`** (gated on D6), or a design §9 amendment that drops it.
