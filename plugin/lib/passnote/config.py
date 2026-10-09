@@ -10,6 +10,7 @@ DEFAULTS = {
     "clip_chars": 600,
     "clip_addressed_chars": 1500,
     "text_max_chars": 4000,
+    "full_text_max_chars": 100000,
     "wake_breaker": {"max": 3, "minutes": 10},
     "ttl_seconds": None,
     "inbound": "auto",
@@ -19,6 +20,7 @@ ENV_INTS = {
     "clip_chars": "PASSNOTE_CLIP_CHARS",
     "clip_addressed_chars": "PASSNOTE_CLIP_ADDRESSED_CHARS",
     "text_max_chars": "PASSNOTE_TEXT_MAX_CHARS",
+    "full_text_max_chars": "PASSNOTE_FULL_TEXT_MAX_CHARS",
     "ttl_seconds": "PASSNOTE_TTL_SECONDS",
 }
 INBOUND_STRICTNESS = {"accept": 0, "auto": 0, "hold": 1, "refuse": 2}

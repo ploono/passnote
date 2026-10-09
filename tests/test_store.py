@@ -394,6 +394,7 @@ class ValidMessageTest(HomeCase):
             ("mode", 123), ("mode", ["default"]),
             ("wake", None), ("wake", "yes"), ("wake", 1),
             ("ts", True), ("ts", "1234"),
+            ("full_chars", "5"), ("full_chars", True), ("full_chars", -1), ("full_chars", 1.5),
         ]
         for field, value in cases:
             with self.subTest(field=field, value="<absent>" if value is ABSENT else value):
@@ -407,6 +408,7 @@ class ValidMessageTest(HomeCase):
             ("mode", ABSENT), ("mode", None), ("mode", "default"), ("mode", "unknown"), ("mode", "custom"),
             ("wake", ABSENT), ("wake", True), ("wake", False),
             ("ts", ABSENT), ("ts", 1234), ("ts", 1234.5),
+            ("full_chars", ABSENT), ("full_chars", None), ("full_chars", 5000),
         ]
         for field, value in cases:
             with self.subTest(field=field, value="<absent>" if value is ABSENT else value):
@@ -420,6 +422,43 @@ class ValidMessageTest(HomeCase):
         _, msg = store.iter_messages("r")[-1]
         self.assertEqual(msg, rec)
         self.assertTrue(store.valid_message(msg))
+
+
+class FullTextTest(HomeCase):
+    def setUp(self):
+        super().setUp()
+        paths.ensure_home()
+        self.rec = {"from": "alice", "sid": new_sid(), "to": "all", "kind": "say", "text": "x" * 4000, "mode": "default"}
+
+    def test_append_with_full_text_writes_the_file_first(self):
+        msg = store.append_message("r", self.rec, "a", full_text="x" * 5000)
+        path = store.full_text_path("r", msg["id"])
+        with open(path, encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), "x" * 5000)
+        self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
+        self.assertEqual(os.stat(os.path.dirname(path)).st_mode & 0o777, 0o700)
+        logged = store.iter_messages("r")[-1][1]
+        self.assertEqual((len(logged["text"]), logged["full_chars"]), (4000, 5000))
+
+    def test_full_text_file_is_removed_when_the_append_fails(self):
+        with mock.patch.object(store, "_write_record", side_effect=OSError(28, "No space left")):
+            with self.assertRaises(OSError):
+                store.append_message("r", self.rec, "a", full_text="x" * 5000)
+        self.assertEqual(os.listdir(store.full_text_dir("r")), [])
+
+    def test_full_text_path_rejects_forged_ids(self):
+        for forged in ("../x", "a1/../../etc", "A1", "", None, 7, "a" * 73 + "1", "a1.txt", "a", "a1\n"):
+            with self.subTest(forged=forged):
+                self.assertIsNone(store.full_text_path("r", forged))
+        self.assertTrue(store.full_text_path("r", "b12").endswith(os.path.join("rooms", "r", "files", "b12.txt")))
+
+    def test_a_huge_cjk_post_keeps_a_readable_log_line(self):
+        msg = store.append_message("r", dict(self.rec, text="漢" * 4000), "a", full_text="漢" * 100000)
+        with open(store.log_path("r"), "rb") as fh:
+            raw = fh.read().split(b"\n")[0]
+        self.assertLess(len(raw), store.MAX_READ)
+        self.assertEqual(store.read_from(store.log_path("r"), 0)[0][0][1], raw)
+        self.assertEqual(msg["full_chars"], 100000)
 
 
 if __name__ == "__main__":

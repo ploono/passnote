@@ -7,6 +7,7 @@ Amended by .scratch/passnote-phase-a/issues/01 (takeover only when gone; gc keep
 - v2.1 folds in the results of spikes A1–A8 (§13), run on Claude Code 2.1.283 / macOS.
 - v2.2 (2026-10-09) amends §4, §6, §7, §8 and §10 from field feedback (#19, #20, #27, #28, #25, #26).
   - #20 (§7 step 6, §10): a message addressed to the receiver by name is clipped at 1,500 characters (`clip_addressed_chars`), not 600.
+  - #27 (§4, §6, §7 step 6, §8, §10): a post over `text_max_chars` keeps its first 4,000 characters in the log and its whole text in a full-text file, `rooms/<room>/files/<id>.txt`; delivery shows the file's path. Posts over `full_text_max_chars` (100,000) are refused.
 
 Approved by the author on 2026-09-27.
 
@@ -113,6 +114,7 @@ repo/
 ```
 config.json                           global settings (§10)
 rooms/<room>/log.jsonl                append-only messages
+rooms/<room>/files/<id>.txt           full text of a post over text_max_chars
 rooms/<room>/events.jsonl             append-only room events: join/leave, wake decisions, holds (for watch/who)
 rooms/<room>/members.json             sid → {name, alias, joined_at, root}; rewritten only at join/leave
 rooms/<room>/meta.json                {root, created_at}
@@ -191,7 +193,7 @@ After clear, resume and compact, the hook injects one line: `passnote: you are <
 - `seq`: a room-wide monotonic counter, recovered from the last line under the lock.
 - `id`: the member's alias (`[a-z]+`, unique per room, never reused; `w` is reserved) followed by `seq` (F38).
 - `to`: `"all"` or a list of names.
-- `text`: capped at 4,000 characters at post time. Anything larger goes in a file, and the message carries its path (F14, F43).
+- `text`: capped at 4,000 characters in the log; a longer post (up to `full_text_max_chars`, 100,000) stores its first 4,000 plus `full_chars`, and its whole text in `files/<id>.txt`, written under the room lock before the log line. The path is derived from room and id, never stored (#27). The secret guard scans the whole text first. A larger text goes in a file the sender writes, and the message carries its path (F14, F43).
 
 **Kinds.** Unknown kinds are rejected at post time (F22).
 
@@ -248,7 +250,7 @@ Readers open the file in binary mode and split on `b"\n"` only.
    2. other addressed messages;
    3. broadcasts.
 
-   A single message longer than its clip is clipped: 1,500 characters (`clip_addressed_chars`) when addressed to the receiver by name, else 600 (`clip_chars`); the larger of the two applies to addressed messages. Non-Latin text may clip earlier, because it costs more of the 8 KB hook output. The clipped form is `… (+N chars: passnote read --id b112)`. Messages that don't fit are listed by id on one overflow line and stay pending. An addressed message is never skipped silently.
+   A single message longer than its clip is clipped: 1,500 characters (`clip_addressed_chars`) when addressed to the receiver by name, else 600 (`clip_chars`); the larger of the two applies to addressed messages. Non-Latin text may clip earlier, because it costs more of the 8 KB hook output. The clipped form is `… (+N chars: passnote read --id b112)`. A message with a full-text file (#27) ends `… (+N chars: full text in <absolute path>)` instead, where N is `full_chars` minus the characters shown; the path is derived from the room and an id matching `^[a-z]{1,72}[0-9]{1,18}$`, never read from the log, and the hook never stats the file. A forged id or `full_chars` gets the `read --id` note. `read --id` prints the stored 4,000 characters and the same note; the receiver opens the file with Read. Messages that don't fit are listed by id on one overflow line and stay pending. An addressed message is never skipped silently.
 7. Emit exactly one JSON object on stdout:
    `{"hookSpecificOutput":{"hookEventName":"<event>","additionalContext":"<header>\n<lines>"},"systemMessage":"passnote[<room>]: 2 from session-b (ask b112)"}`.
    The systemMessage makes every delivery visible to the human (F26). A3 verified that it is shown to the user, never sent to the model, and costs 0 tokens.
@@ -316,7 +318,7 @@ Exit codes:
 | 0 | ok |
 | 2 | usage or room error |
 | 3 | not joined |
-| 4 | text too long |
+| 4 | text too long (over `full_text_max_chars`, 100,000) |
 
 The skill tells the sender to send exactly the printed doorbell. The doorbell carries no message text, only the id and sender (#19, amending F1). Pilots showed a receiver woken by a gist read the message twice, once clipped, and could act on the clipped copy before the whole one arrived through the hook. The cost: Claude Code's native approve/deny shows the sender and id, not content. The one-step doorbell (no SendMessage relay) remains Phase D. If SendMessage fails, the sender re-resolves the name with ListAgents once.
 
@@ -385,6 +387,7 @@ All commands take `--room`. The room is resolved as follows: the explicit `--roo
 | `clip_chars` | 600 |
 | `clip_addressed_chars` | 1500 |
 | `text_max_chars` | 4000 |
+| `full_text_max_chars` | 100000 |
 | `wake_breaker` | `{max: 3, minutes: 10}` |
 | `ttl_seconds` | auto |
 | `inbound` | stricter-only |

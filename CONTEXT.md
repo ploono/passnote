@@ -86,6 +86,10 @@ _Avoid_: lock, reservation
 **Status**:
 A message describing what the sender is doing right now. Members see it on request, and it is never delivered to them.
 
+**Full-text file**:
+The file holding the whole text of a message too long for the log. Delivery shows its path.
+_Avoid_: attachment, spill
+
 ## Delivery and trust
 
 **Delivery**:

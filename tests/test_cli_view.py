@@ -172,6 +172,13 @@ class WatchTest(CliCase):
         code, out, _ = self.run_cli(None, "watch", "--all", "--once")
         self.assertIn("a1 alice", out)
 
+    def test_watch_points_a_long_post_at_its_full_text_file(self):
+        self.run_cli(self.a, "post", stdin="y" * 5000)
+        note = f"… (+1000 chars: full text in {store.full_text_path('r', 'a1')})"
+        self.assertIn("y" * 4000 + note, self.run_cli(None, "watch", "r", "--once")[1])
+        _, out, _ = self.follow([lambda: self.run_cli(self.a, "post", stdin="z" * 4500)], "r", "--last", "0")
+        self.assertIn("z" * 4000 + f"… (+500 chars: full text in {store.full_text_path('r', 'a2')})", out)
+
     def test_watch_shows_unanswered_once_at_startup_before_the_recent_lines(self):
         self.run_cli(self.a, "post", "--to", "bob", "--kind", "ask", stdin="review pr 12?")
         _, out, _ = self.run_cli(None, "watch", "r", "--once")

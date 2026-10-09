@@ -595,6 +595,21 @@ class AddressedClipTest(DeliverCase):
         self.assertIn("r" * 1700, self.context(self.deliver(self.b)))
 
 
+class FullTextDeliverTest(DeliverCase):
+    def test_a_long_post_is_delivered_with_its_path(self):
+        me = store.load_members("r")[self.a]
+        store.append_message("r", {"from": "alice", "sid": self.a, "to": ["bob"], "kind": "done", "text": "q" * 4000,
+                                   "mode": "default"}, me["alias"], full_text="q" * 6000)
+        ctx = self.context(self.deliver(self.b))
+        self.assertIn("q" * 1500 + f"… (+4500 chars: full text in {store.full_text_path('r', 'a1')})", ctx)
+
+    def test_forged_full_chars_keep_the_output_under_8kb(self):
+        for i in range(60):
+            post(self.a, "r", "漢" * 4000, full_chars=10 ** 12, to=["bob"], kind="ask")
+        out = hook.main("PostToolBatch", hook_input(self.b), self.env(self.b))
+        self.assertLess(len(out.encode()), 8192)
+
+
 class DeliverFixRound2Test(RoomIdsCase):
     """Task 12 review fix round 2."""
 

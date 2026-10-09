@@ -265,7 +265,7 @@ class PostTest(CliCase):
         self.assertNotIn("QUEUED", "".join(outs))
 
     def test_errors(self):
-        self.assertEqual(self.run_cli(self.a, "post", stdin="x" * 4001)[0], 4)
+        self.assertEqual(self.run_cli(self.a, "post", stdin="x" * 100001)[0], 4)
         code, _, err = self.run_cli(self.a, "post", "--to", "carol", stdin="hi")
         self.assertEqual(code, 2)
         self.assertIn("members: alice, bob", err)
@@ -278,10 +278,37 @@ class PostTest(CliCase):
         self.assertEqual(self.run_cli(self.a, "post", "--kind", "ack", stdin="hi")[0], 2)
 
     def test_the_length_cap_comes_before_the_secret_scan(self):
-        text = "API_KEY=abcd1234abcd1234abcd " + "x" * 4000
+        text = "API_KEY=abcd1234abcd1234abcd " + "x" * 100000
         code, _, err = self.run_cli(self.a, "post", stdin=text)
         self.assertEqual(code, 4)
         self.assertNotIn("secret", err)
+
+    def test_a_long_post_is_saved_to_a_full_text_file(self):
+        code, out, _ = self.run_cli(self.a, "post", stdin="y" * 5000)
+        path = store.full_text_path("r", "a1")
+        self.assertEqual((code, out), (0, f"ok a1 (full text: {path})\n"))
+        logged = store.iter_messages("r")[-1][1]
+        self.assertEqual((logged["text"], logged["full_chars"]), ("y" * 4000, 5000))
+        with open(path, encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), "y" * 5000)
+
+    def test_a_post_at_the_cap_is_unchanged(self):
+        code, out, _ = self.run_cli(self.a, "post", stdin="y" * 4000)
+        self.assertEqual((code, out), (0, "ok a1\n"))
+        self.assertNotIn("full_chars", store.iter_messages("r")[-1][1])
+        self.assertFalse(os.path.exists(store.full_text_dir("r")))
+
+    def test_the_full_text_cap_refuses_and_writes_nothing(self):
+        self.assertEqual(self.run_cli(self.a, "post", stdin="x" * 100001)[0], 4)
+        self.assertEqual(store.iter_messages("r"), [])
+        self.assertFalse(os.path.exists(store.full_text_dir("r")))
+
+    def test_the_secret_guard_checks_the_full_text(self):
+        code, _, err = self.run_cli(self.a, "post", stdin="x" * 4500 + " API_KEY=abcd1234abcd1234abcd")
+        self.assertEqual(code, 2)
+        self.assertIn("secret", err)
+        self.assertEqual(store.iter_messages("r"), [])
+        self.assertFalse(os.path.exists(store.full_text_dir("r")))
 
     def test_mode_is_stamped_from_session_meta(self):
         set_mode(self.a, "acceptEdits")
@@ -339,6 +366,11 @@ class ReadTest(CliCase):
         self.assertEqual(len(self.run_cli(self.b, "read", "--since", "a1")[1].splitlines()), 1)
         self.assertTrue(self.run_cli(self.b, "read", "--id", "a3")[1].startswith("a3 alice→you say: "))
         self.assertEqual(self.run_cli(self.b, "read", "--id", "a2")[0], 2)
+
+    def test_read_id_points_at_the_full_text(self):
+        self.run_cli(self.a, "post", stdin="y" * 5000)
+        out = self.run_cli(self.b, "read", "--id", "a1")[1]
+        self.assertIn("y" * 4000 + f"… (+1000 chars: full text in {store.full_text_path('r', 'a1')})", out)
 
     def test_read_shows_the_readers_own_lines(self):
         self.run_cli(self.a, "post", "--to", "bob", stdin="from me")

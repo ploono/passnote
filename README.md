@@ -70,6 +70,7 @@ run inside a Claude Code session, where its output would reach the model.
 - `UserPromptSubmit` and `PostToolBatch` hooks deliver new lines (at most 2,000 characters per turn, addressed asks first; a message is clipped at 1,500 characters when it is addressed to you by name, 600 otherwise; non-Latin text may clip earlier, because it costs more of the 8 KB hook output) and advance the cursor. A tiny sh guard exits in milliseconds for sessions that haven't joined.
 - `SessionStart` and `SessionEnd` hooks keep membership across `/clear`, `/resume` and compaction. Subagents never consume their parent's messages.
 - When a post needs an idle member, `passnote post` prints a SendMessage doorbell line, but only while that member's session is running and its prompt cache is warm, and at most 3 times per 10 minutes. Otherwise it prints `WAIT`, and the message waits for the member's next turn. A gone member (its session ended) is never woken, even with `--urgent`; it sees the message when the session is resumed. Nor is a member the post may be held from (see Trust and safety, or either mode not recorded yet): it prints `WAIT <name> held (<reason>)`, because Claude Code would hold the doorbell too, and each hold notice costs the sender a turn. A doorbell carries only the message id and sender (`<id> from <sender>: passnote note waiting`); the receiver reads the text from the hook, once.
+- A post over 4,000 characters (up to 100,000) keeps its first 4,000 in the log; the whole text goes to `rooms/<room>/files/<id>.txt` (mode 0600), and the delivered line ends with that path. The file is removed with the room's data (`passnote uninstall --purge`).
 
 ### One hook run
 ![One hook run: a sh guard exits in milliseconds for sessions that haven't joined; subagents are skipped; with nothing new it exits at zero tokens; otherwise it filters out your own lines, lines for others and status lines, holds messages from another permission class (or under an inbound hold) for you only, renders up to 2,000 characters with asks first, and adds them to the turn.](assets/readme/delivery.svg)
@@ -101,7 +102,7 @@ See [SECURITY.md](SECURITY.md) to report a vulnerability.
 
 ## Setup notes
 - Sandbox: add `{"sandbox":{"enabled":true,"filesystem":{"allowWrite":["~/.local/state/passnote"]}}}` to your settings. Hooks need nothing.
-- Suggested permissions: `Bash(passnote post *)`, `Bash(passnote read *)`, `Bash(passnote who *)`, `Bash(passnote join *)`, `Bash(passnote claim *)`. Don't allow `Bash(passnote *)`.
+- Suggested permissions: `Bash(passnote post *)`, `Bash(passnote read *)`, `Bash(passnote who *)`, `Bash(passnote join *)`, `Bash(passnote claim *)`, `Read(~/.local/state/passnote/rooms/**)`. Don't allow `Bash(passnote *)`.
 - `passnote post` never rings a doorbell between sessions in different permission classes. The receiver gets such a message on its next turn only if it was launched with `PASSNOTE_ALLOW_BYPASS=1`.
 - Run `passnote doctor` to check an installation.
 

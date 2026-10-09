@@ -1,10 +1,11 @@
 import json
+import os
 import random
 import unittest
 from unittest import mock
 
 import support  # noqa: F401 (puts plugin/lib on sys.path)
-from passnote import render
+from passnote import render, store
 
 
 def msg(**kw):
@@ -124,6 +125,35 @@ class RenderLineTest(unittest.TestCase):
         line = render.render_line(m, "bob", MEMBERS, 6)
         self.assertIn("aaaaa\\n… (+10 chars: passnote read --id a1)", line)
 
+    def test_a_long_message_points_at_its_full_text_file(self):
+        with mock.patch.dict(os.environ, {"PASSNOTE_HOME": "/nonexistent-home"}):
+            m = msg(text="z" * 4000, full_chars=5000)
+            line = render.render_line(m, "bob", MEMBERS, 600, room="r")
+            path = store.full_text_path("r", "a1")
+        self.assertTrue(line.endswith(f"z… (+4400 chars: full text in {path})"), line[-120:])
+
+    def test_unbounded_render_still_points_at_the_file(self):
+        with mock.patch.dict(os.environ, {"PASSNOTE_HOME": "/nonexistent-home"}):
+            line = render.render_line(msg(text="z" * 4000, full_chars=5000), None, MEMBERS, render.UNBOUNDED, room="r")
+        self.assertIn("z" * 4000 + "… (+1000 chars: full text in ", line)
+
+    def test_forged_full_text_fields_fall_back_to_read_id(self):
+        with mock.patch.dict(os.environ, {"PASSNOTE_HOME": "/nonexistent-home"}):
+            forged_id = render.render_line(msg(id="../x", text="z" * 700, full_chars=10 ** 9), "bob", MEMBERS, 600, room="r")
+            too_small = render.render_line(msg(text="z" * 700, full_chars=3), "bob", MEMBERS, 600, room="r")
+            no_room = render.render_line(msg(text="z" * 700, full_chars=5000), "bob", MEMBERS, 600)
+        self.assertIn("passnote read --id ../x)", forged_id)
+        self.assertNotIn("full text in", forged_id)
+        for line in (too_small, no_room):
+            self.assertIn("(+100 chars: passnote read --id a1)", line)
+
+    def test_a_forged_room_or_bool_full_chars_falls_back(self):
+        with mock.patch.dict(os.environ, {"PASSNOTE_HOME": "/nonexistent-home"}):
+            bad_room = render.render_line(msg(text="z" * 700, full_chars=5000), "bob", MEMBERS, 600, room="../x")
+            as_bool = render.render_line(msg(text="z", full_chars=True), "bob", MEMBERS, 600, room="r")
+        self.assertIn("(+100 chars: passnote read --id a1)", bad_room)
+        self.assertTrue(as_bool.endswith("say: z"), as_bool)
+
 
 class BuildTest(unittest.TestCase):
     def test_an_item_clip_overrides_the_default_clip(self):
@@ -161,6 +191,17 @@ class BuildTest(unittest.TestCase):
         # one more char would not fit: the clip is the largest that does
         line = render.render_line(bigger["msg"], "bob", MEMBERS, shown + 1)
         self.assertGreater(len(json.dumps(render.HEADER + "\n" + line)) - 2, render.MAX_CONTEXT_JSON)
+
+    def test_build_points_a_long_message_at_its_file_within_the_cap(self):
+        with mock.patch.dict(os.environ, {"PASSNOTE_HOME": "/nonexistent-home"}):
+            path = store.full_text_path("r", "a1")
+            items = [dict(item(msg(id=f"a{i}", seq=i, to=["bob"], kind="ask", text="漢" * 4000, full_chars=10 ** 12)),
+                          clip=1500) for i in (1, 2)]
+            ctx, emitted, overflow = render.build(items, "bob", 2000, 600)
+        self.assertLessEqual(len(json.dumps(ctx, ensure_ascii=True)) - 2, render.MAX_CONTEXT_JSON)
+        self.assertIn(f"chars: full text in {path})", ctx)
+        self.assertEqual(emitted[0]["line"], ctx.split("\n")[1])
+        self.assertTrue(ctx.split("\n")[-1].startswith("… 1 not shown yet: a2"))
 
     def test_addressed_by_name(self):
         self.assertTrue(render.addressed_by_name(msg(to=["bob", "carol"]), "bob"))
