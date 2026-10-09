@@ -8,6 +8,7 @@ from . import paths
 DEFAULTS = {
     "render_budget_chars": 2000,
     "clip_chars": 600,
+    "clip_addressed_chars": 1500,
     "text_max_chars": 4000,
     "wake_breaker": {"max": 3, "minutes": 10},
     "ttl_seconds": None,
@@ -16,6 +17,7 @@ DEFAULTS = {
 ENV_INTS = {
     "render_budget_chars": "PASSNOTE_RENDER_BUDGET_CHARS",
     "clip_chars": "PASSNOTE_CLIP_CHARS",
+    "clip_addressed_chars": "PASSNOTE_CLIP_ADDRESSED_CHARS",
     "text_max_chars": "PASSNOTE_TEXT_MAX_CHARS",
     "ttl_seconds": "PASSNOTE_TTL_SECONDS",
 }

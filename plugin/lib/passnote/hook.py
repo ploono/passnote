@@ -383,6 +383,9 @@ def _deliver_locked(sid, meta, inp, event, env):
         if moved:
             new_cursors[room] = moved
 
+    addressed_clip = max(cfg["clip_chars"], cfg["clip_addressed_chars"])
+    for it in fire.items:
+        it["clip"] = addressed_clip if render.addressed_by_name(it["msg"], it["me"]) else cfg["clip_chars"]
     context, emitted, overflow = render.build(fire.items, fire.me, cfg["render_budget_chars"], cfg["clip_chars"])
     message = render.system_message(emitted, fire.held, fire.me)
     # Record what we emit, and what overflowed, before advancing cursors: if this process dies

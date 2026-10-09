@@ -572,6 +572,29 @@ class RoomIdsCase(DeliverCase):
         return fires
 
 
+class AddressedClipTest(DeliverCase):
+    def test_an_addressed_report_of_1500_chars_arrives_whole(self):
+        post(self.a, "r", "r" * 1500, kind="done", to=["bob"])
+        ctx = self.context(self.deliver(self.b))
+        self.assertIn("r" * 1500, ctx)
+        self.assertNotIn("passnote read --id", ctx)
+
+    def test_a_broadcast_keeps_the_600_char_clip(self):
+        post(self.a, "r", "b" * 1500)
+        self.assertIn("b" * 600 + "… (+900 chars: passnote read --id a1)", self.context(self.deliver(self.b)))
+
+    def test_the_addressed_clip_is_configurable(self):
+        os.environ["PASSNOTE_CLIP_ADDRESSED_CHARS"] = "800"
+        post(self.a, "r", "r" * 1500, to=["bob"])
+        self.assertIn("(+700 chars: passnote read --id a1)", self.context(self.deliver(self.b)))
+
+    def test_a_larger_clip_chars_wins_for_addressed_messages(self):
+        os.environ["PASSNOTE_CLIP_CHARS"] = "1800"
+        os.environ["PASSNOTE_CLIP_ADDRESSED_CHARS"] = "1500"
+        post(self.a, "r", "r" * 1700, to=["bob"])
+        self.assertIn("r" * 1700, self.context(self.deliver(self.b)))
+
+
 class DeliverFixRound2Test(RoomIdsCase):
     """Task 12 review fix round 2."""
 

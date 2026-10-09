@@ -126,6 +126,36 @@ class RenderLineTest(unittest.TestCase):
 
 
 class BuildTest(unittest.TestCase):
+    def test_an_item_clip_overrides_the_default_clip(self):
+        it = dict(item(msg(to=["bob"], text="x" * 1400)), clip=1500)
+        ctx, emitted, overflow = render.build([it], "bob", 2000, 600)
+        self.assertIn("x" * 1400, ctx)
+        self.assertNotIn("passnote read --id", ctx)
+
+    def test_an_item_without_a_clip_uses_the_default(self):
+        ctx, _, _ = render.build([item(msg(text="x" * 1400))], "bob", 2000, 600)
+        self.assertIn("x" * 600 + "… (+800 chars: passnote read --id a1)", ctx)
+
+    def test_two_long_addressed_messages_still_share_one_budget(self):
+        items = [dict(item(msg(id=f"a{i}", seq=i, to=["bob"], text="x" * 1400)), clip=1500) for i in (1, 2)]
+        ctx, emitted, overflow = render.build(items, "bob", 2000, 600)
+        self.assertEqual([it["msg"]["id"] for it in emitted], ["a1"])
+        self.assertEqual([it["msg"]["id"] for it in overflow], ["a2"])
+        self.assertIn("1 not shown yet: a2", ctx)
+
+    def test_long_cjk_addressed_messages_keep_the_overflow_line(self):
+        items = [dict(item(msg(id=f"a{i}", seq=i, to=["bob"], kind="ask", text="漢" * 1500)), clip=1500) for i in (1, 2)]
+        ctx, emitted, overflow = render.build(items, "bob", 2000, 600)
+        self.assertLessEqual(len(json.dumps(ctx, ensure_ascii=True)) - 2, render.MAX_CONTEXT_JSON)
+        self.assertEqual(len(emitted), 1)  # the first line shrank to fit
+        self.assertTrue(ctx.split("\n")[-1].startswith("… 1 not shown yet"))
+
+    def test_addressed_by_name(self):
+        self.assertTrue(render.addressed_by_name(msg(to=["bob", "carol"]), "bob"))
+        self.assertFalse(render.addressed_by_name(msg(to="all"), "bob"))
+        self.assertFalse(render.addressed_by_name(msg(to=["carol"]), "bob"))
+        self.assertFalse(render.addressed_by_name(msg(to=["bob"]), None))
+
     def test_priority_and_overflow(self):
         items = [item(msg(id=f"a{i}", seq=i, text="x" * 500)) for i in range(1, 6)]
         items.append(item(msg(id="a9", seq=9, to=["bob"], kind="ask", text="urgent?")))

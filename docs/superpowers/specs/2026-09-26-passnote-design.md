@@ -6,6 +6,7 @@ Amended by .scratch/passnote-phase-a/issues/01 (takeover only when gone; gc keep
 - v2 incorporates the multi-agent review in `2026-09-27-passnote-spec-review.md`; finding ids (F1…F43) are cited inline.
 - v2.1 folds in the results of spikes A1–A8 (§13), run on Claude Code 2.1.283 / macOS.
 - v2.2 (2026-10-09) amends §4, §6, §7, §8 and §10 from field feedback (#19, #20, #27, #28, #25, #26).
+  - #20 (§7 step 6, §10): a message addressed to the receiver by name is clipped at 1,500 characters (`clip_addressed_chars`), not 600.
 
 Approved by the author on 2026-09-27.
 
@@ -247,7 +248,7 @@ Readers open the file in binary mode and split on `b"\n"` only.
    2. other addressed messages;
    3. broadcasts.
 
-   A single message longer than 600 characters is clipped: `… (+N chars: passnote read --id b112)`. Messages that don't fit are listed by id on one overflow line and stay pending. An addressed message is never skipped silently.
+   A single message longer than its clip is clipped: 1,500 characters (`clip_addressed_chars`) when addressed to the receiver by name, else 600 (`clip_chars`); the larger of the two applies to addressed messages. The clipped form is `… (+N chars: passnote read --id b112)`. Messages that don't fit are listed by id on one overflow line and stay pending. An addressed message is never skipped silently.
 7. Emit exactly one JSON object on stdout:
    `{"hookSpecificOutput":{"hookEventName":"<event>","additionalContext":"<header>\n<lines>"},"systemMessage":"passnote[<room>]: 2 from session-b (ask b112)"}`.
    The systemMessage makes every delivery visible to the human (F26). A3 verified that it is shown to the user, never sent to the model, and costs 0 tokens.
@@ -382,6 +383,7 @@ All commands take `--room`. The room is resolved as follows: the explicit `--roo
 |---|---|
 | `render_budget_chars` | 2000 |
 | `clip_chars` | 600 |
+| `clip_addressed_chars` | 1500 |
 | `text_max_chars` | 4000 |
 | `wake_breaker` | `{max: 3, minutes: 10}` |
 | `ttl_seconds` | auto |

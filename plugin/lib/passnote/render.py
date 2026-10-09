@@ -108,6 +108,12 @@ def _resolved_name(msg, members) -> str:
     return f"{escape_text(_clip_field(shown))}{flag}"
 
 
+def addressed_by_name(msg, me) -> bool:
+    """True iff `me` is named in a list-valued `to` (a broadcast, "all", is not addressed)."""
+    to = msg.get("to")
+    return isinstance(to, list) and me is not None and me in to
+
+
 def render_line(msg, me, members, clip) -> str:
     msg_id = escape_text(_clip_field(msg.get("id", "?")))
     head = f"{msg_id} {_resolved_name(msg, members)}→{audience(msg.get('to'), me)} {escape_text(_clip_field(msg.get('kind', 'say')))}"
@@ -182,7 +188,7 @@ def build(items, me, budget, clip):
         if not emitted:
             # The first line is always emitted, but it must still fit pack_cap: shrink its clip
             # (never below MIN_CLIP) until the serialized context fits, or give up.
-            cur_clip = clip
+            cur_clip = it.get("clip", clip)
             line = rendered(it, cur_clip)
             while cur_clip > MIN_CLIP and size + _json_len("\n" + line) > pack_cap:
                 cur_clip = max(MIN_CLIP, cur_clip // 2)
@@ -192,7 +198,7 @@ def build(items, me, budget, clip):
             used += 1 + len(line)
             size += _json_len("\n" + line)
             continue
-        line = rendered(it, clip)
+        line = rendered(it, it.get("clip", clip))
         if used + 1 + len(line) > budget:
             overflow.append(it)
             continue
