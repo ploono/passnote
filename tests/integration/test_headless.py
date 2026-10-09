@@ -274,6 +274,44 @@ class HeadlessTest(unittest.TestCase):
         # Positive evidence that the PreToolUse hook denied it (not that the model never tried).
         self.assertIn("a subagent can't post or change membership", out, self.errors())
 
+    def slash(self, command):
+        """One `claude -p` turn that types a slash command: (exit code, stdout + stderr). Only Read is
+        allowed, so the join skill's own allowed-tools rule is what lets its ```! block run."""
+        cmd = ["claude", "-p", command] + ISOLATION + ["--output-format", "stream-json", "--verbose",
+                                                      "--allowedTools", "Read"]
+        self.runs += 1
+        res = subprocess.run(cmd, cwd=self.work, env=self.env, capture_output=True, text=True, timeout=SESSION_TIMEOUT)
+        self.keep(f"run{self.runs}.out", res.stdout + "\n--- stderr\n" + res.stderr)
+        return res.returncode, res.stdout + res.stderr
+
+    def member_names(self):
+        """Member names across every room: the skill joins the work dir's default room, not `it`."""
+        rooms_dir = os.path.join(self.home, "rooms")
+        rooms = os.listdir(rooms_dir) if os.path.isdir(rooms_dir) else []
+        return sorted(info.get("name") for room in rooms for info in self.members_of(room).values())
+
+    def members_of(self, room):
+        try:
+            with open(os.path.join(self.home, "rooms", room, "members.json")) as fh:
+                return json.load(fh)
+        except OSError:
+            return {}
+
+    def test_slash_join_joins_by_name_without_a_model_tool_call(self):
+        code, out = self.slash("/passnote:join bob")
+        self.assertEqual(code, 0, out[-2000:] + self.errors())
+        self.assertEqual(self.member_names(), ["bob"], self.errors())
+        # The ```! block joined before the model's turn; the model only reported it.
+        self.assertNotIn('"type":"tool_use"', out.replace(" ", ""))
+
+    def test_slash_join_never_runs_shell_syntax_in_the_name(self):
+        marker = os.path.join(self.tmp, "MARKER")
+        _, out = self.slash(f"/passnote:join $(touch {marker})")
+        self.assertFalse(os.path.exists(marker), "a typed $(...) ran")
+        self.assertEqual(self.member_names(), [])
+        # Positive evidence that passnote refused the name (not that the block never ran).
+        self.assertIn("invalid name", out, self.errors())
+
 
 if __name__ == "__main__":
     unittest.main()

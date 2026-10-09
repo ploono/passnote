@@ -145,6 +145,81 @@ class JoinTest(CliCase):
         self.assertFalse(os.path.exists(cursor.path(self.a, "r")))
 
 
+
+class JoinNameStdinTest(CliCase):
+    """`join --name-stdin`: what /passnote:join feeds it, the typed name framed as `[<name>]` (#5)."""
+
+    def join_stdin(self, text, *argv, **env):
+        return self.run_cli(self.a, "join", "r", "--name-stdin", *argv, stdin=text, **env)
+
+    def assert_refused(self, text, message):
+        code, out, err = self.join_stdin(text)
+        self.assertEqual(code, 2, (text, out, err))
+        self.assertIn(message, err)
+        self.assertEqual(out, "")
+        self.assertFalse(os.path.exists(os.path.join(paths.room_dir("r"), "members.json")), text)
+        self.assertEqual(sessions.load_meta(self.a)["rooms"], [])
+
+    def test_a_framed_name_joins_as_that_name(self):
+        for text in ("[bob]\n", "[bob]", "[ bob ]\n", "[\tbob]\n"):
+            with self.subTest(text=text):
+                code, out, err = self.join_stdin(text)
+                self.assertEqual(code, 0, err)
+                self.assertTrue(out.startswith("joined r (r) as bob\n"), out)
+                self.assertEqual(sessions.load_meta(self.a)["name_source"], "as")
+
+    def test_empty_brackets_resolve_the_name_as_a_bare_join_does(self):
+        reg = os.path.join(self.claude_home, "sessions")
+        os.makedirs(reg)
+        with open(os.path.join(reg, f"{os.getpid()}.json"), "w") as fh:
+            json.dump({"name": "session-a", "nameSource": "user"}, fh)
+        for text in ("[]\n", "[  ]\n"):
+            with self.subTest(text=text):
+                code, out, err = self.join_stdin(text, CLAUDE_PID=os.getpid())
+                self.assertEqual(code, 0, err)
+                self.assertIn("as session-a", out)
+                self.assertEqual(sessions.load_meta(self.a)["name_source"], "registry")
+
+    def test_empty_brackets_keep_the_session_name(self):
+        self.run_cli(self.a, "join", "r1", "--as", "alice")
+        code, out, err = self.join_stdin("[]\n")
+        self.assertEqual(code, 0, err)
+        self.assertIn("as alice", out)
+
+    def test_a_cut_short_or_multi_line_frame_is_refused(self):
+        for text in ("", "\n", "bob\n", "[bob\n", "bob]\n", "[bob]\n\n", "[bob]\n[x]\n", "[bob\n]\n",
+                     "[bob] x\n", "x[bob]\n", "[bob]\r\n", "[bo\rb]\n"):
+            with self.subTest(text=text):
+                self.assert_refused(text, "was cut short or spans lines")
+
+    def test_the_name_goes_through_name_validation(self):
+        for name in ("bo'b\"; $(touch M)", "`id`", "a b", "x" * 65, "..", "a]b"):
+            with self.subTest(name=name):
+                self.assert_refused(f"[{name}]\n", "invalid name")
+
+    def test_a_reserved_name_is_refused(self):
+        self.assert_refused("[All]\n", "is reserved")
+
+    def test_as_and_name_stdin_are_exclusive(self):
+        code, out, err = self.join_stdin("[bob]\n", "--as", "alice")
+        self.assertEqual(code, 2)
+        self.assertIn("not allowed with", err)
+        self.assertEqual(sessions.load_meta(self.a)["rooms"], [])
+
+    def test_no_name_found_points_at_the_slash_command(self):
+        code, _, err = self.join_stdin("[]\n")
+        self.assertEqual(code, 2)
+        self.assertIn("/passnote:join <name>", err)
+        self.assertIn("/rename", err)
+        self.assertNotIn("ListAgents", err)
+        self.assertNotIn("--as", err)
+
+    def test_without_name_stdin_the_no_name_error_is_unchanged(self):
+        code, _, err = self.run_cli(self.a, "join", "r")
+        self.assertEqual(code, 2)
+        self.assertIn("pass --as <name> (use your ListAgents name)", err)
+
+
 class PostTest(CliCase):
     def setUp(self):
         super().setUp()

@@ -5,12 +5,13 @@ Amended by .scratch/passnote-phase-a/issues/01 (takeover only when gone; gc keep
 **Status:** spec v2.2 (2026-10-09).
 - v2 incorporates the multi-agent review in `2026-09-27-passnote-spec-review.md`; finding ids (F1…F43) are cited inline.
 - v2.1 folds in the results of spikes A1–A8 (§13), run on Claude Code 2.1.283 / macOS.
-- v2.2 (2026-10-09) amends §4, §6, §7, §8 and §10 from field feedback (#19, #20, #27, #28, #25, #26).
+- v2.2 (2026-10-09) amends §4, §6, §7, §8 and §10 from field feedback (#19, #20, #27, #28, #25, #26, #5).
   - #20 (§7 step 6, §10): a message addressed to the receiver by name is clipped at 1,500 characters (`clip_addressed_chars`), not 600.
   - #27 (§4, §6, §7 step 6, §8, §10): a post over `text_max_chars` keeps its first 4,000 characters in the log and its whole text in a full-text file, `rooms/<room>/files/<id>.txt`; delivery shows the file's path. Posts over `full_text_max_chars` (100,000) are refused.
   - #28 (§6, §7): seen receipts. A sender's next turn shows `passnote: seen by <name>: <id>` once an addressee's turn has delivered its addressed `ask` or `prop`. The sender's own hook works this out from the delivery evidence the addressee's hook keeps; no message is sent.
   - #25 (§4, §6, §7 step 5, §10): threads. A message may carry `thread` (`post --thread <name>`; a reply inherits its ask's thread). A member with a subscription (`subscribe`/`unsubscribe`, stored as `threads` on its `members.json` entry) is delivered only its threads, plus unthreaded lines, props, replies to its own posts and lines addressed to it by name.
   - #26 (§7, §10): digest mode. A member with `digest: true` on its `members.json` entry (`passnote digest on|off`) gets one line per (room, thread) with new activity instead of every line; props, replies to its own posts, lines posted with `--wake`, and `ask`, `err`, `prop`, `nak` and `ans` addressed to it by name still arrive whole.
+  - #5 (§10): `/passnote:join [name]`, a skill only the human can run, joins without a model tool call. It hands the typed name to `join --name-stdin` as `[<name>]` through a quoted heredoc.
 
 Approved by the author on 2026-09-27.
 
@@ -391,7 +392,7 @@ All commands take `--room`. The room is resolved as follows: the explicit `--roo
 
 | Command | Purpose |
 |---|---|
-| `join [room] [--as name]` | Join; print the room, root and members |
+| `join [room] [--as name \| --name-stdin]` | Join; print the room, root and members. `--name-stdin` reads one line, `[<name>]` (`[]`: no name given), and refuses anything else: what `/passnote:join` sends (#5) |
 | `leave` / `rooms` | Leave the room; list joined rooms |
 | `post [--to a,b] [--kind k] [--re id] [--thread name] [--wake\|--urgent]` | Post a message. Text is read from stdin; the skill uses a quoted heredoc, so the shell doesn't expand it. A reply without `--thread` keeps its ask's thread |
 | `claim "<what>"` / `claim --release <id>` | Claim work or release a claim |
@@ -432,6 +433,12 @@ Plugin `userConfig` is not visible to Bash-tool commands, so the CLI does not us
   - a recommended allowlist: `Bash(passnote post *)`, `read`, `who`, `join`, `claim`, never `Bash(passnote *)` (F9);
   - the sandbox `allowWrite` entry for `PASSNOTE_HOME` (F19);
   - `notify_when_idle` for "tell me when X finishes", noting that the subscribe call still costs a turn (F28).
+
+**Skill** `skills/join/SKILL.md`, invoked by the human as `/passnote:join [name]` (#5). Verified on Claude Code 2.1.295.
+- `disable-model-invocation: true`: it is not in the model's skill list, so it adds no always-on cost, and the model can't invoke it, so its arguments are only what the human typed.
+- Its ```` ```! ```` block runs `${CLAUDE_PLUGIN_ROOT}/bin/passnote join --name-stdin` before the model's turn, under an `allowed-tools` grant for exactly that command. Claude Code pastes the arguments into the block's text before a shell parses it, so the name goes through a quoted heredoc as `[<name>]`, never as `"$ARGUMENTS"`. The brackets show that the name arrived whole: a ```` ``` ```` in the arguments can close the block early. The single-line guarantee also relies on Claude Code escaping `!` and backticks in the arguments it pastes. A multi-line argument holding the heredoc's terminator line could still run commands. Only the human can type one, so passnote doesn't defend against it further.
+- `${CLAUDE_PLUGIN_ROOT}` is unquoted in the block, so that its command matches the `allowed-tools` rule. A plugin path with spaces therefore fails closed: the shell can't find the command, the block exits non-zero and nothing in the name runs.
+- A refusal exits non-zero, so Claude Code shows the error and starts no model turn. With `disableSkillShellExecution` the block doesn't run, and the body tells the model to run `passnote join` itself, adding `--as <name>` only for a valid name, so the raw argument never reaches its Bash command.
 
 ## 11. Operability (F27)
 
