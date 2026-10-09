@@ -187,7 +187,8 @@ class _Fire:
                 self.ahead.setdefault(ref["room"], []).append(ref)
         self.ahead_keys = {(ref["room"], ref["id"], ref["seq"]) for refs in self.ahead.values() for ref in refs}
         # This session's addressed asks and props waiting to be reported seen (see _receipts).
-        self.pending = [entry for entry in receipts if _valid_receipt(entry, self.rooms)][-MAX_PENDING_RECEIPTS:]
+        now = time.time()
+        self.pending = [entry for entry in receipts if _valid_receipt(entry, self.rooms, now)][-MAX_PENDING_RECEIPTS:]
 
     def track(self, room, msg):
         """The sender's own addressed ask or prop, passed by its own cursor: wait to report it seen."""
@@ -292,12 +293,14 @@ def _finite(value) -> bool:
         return False
 
 
-def _valid_receipt(entry, rooms_joined) -> bool:
-    """A pending receipt as track() records it; anything else in the emit state is dropped."""
+def _valid_receipt(entry, rooms_joined, now) -> bool:
+    """A pending receipt as track() records it; anything else in the emit state is dropped, and so is a
+    ts in the future (#31): it would never age out."""
     if not isinstance(entry, dict) or entry.get("room") not in rooms_joined:
         return False
     seq, to = entry.get("seq"), entry.get("to")
     return (isinstance(seq, int) and not isinstance(seq, bool) and seq >= 1 and _finite(entry.get("ts"))
+            and entry["ts"] <= now
             and isinstance(to, list) and all(render.receipt_pair_ok(name, entry.get("id")) for name in to)
             and (entry.get("mode") is None or isinstance(entry.get("mode"), str)))
 
@@ -310,22 +313,25 @@ def _valid_evidence(entry) -> bool:
 
 
 def _delivered(previous, emitted, now):
-    """This session's delivery evidence after a fire: the addressed (by name) asks and props it
-    emitted to its model, as {room, id, seq, ts}. Only lines emitted whole count, never held,
-    overflowing or digested ones (a digest line doesn't show the text), so a sender's receipt can't
-    report a held message seen. Bounded: the last MAX_DELIVERED, none older than RECEIPT_MAX_AGE;
-    malformed entries are dropped."""
+    """(evidence, added): this session's delivery evidence after a fire, and whether this fire added
+    any. Evidence is the addressed (by name) asks and props it emitted to its model, as
+    {room, id, seq, ts}. Only lines emitted whole count, never held, overflowing, digested or
+    fallback ones (their text didn't reach the model), so a sender's receipt can't report a held
+    message seen. Bounded: the last MAX_DELIVERED, none older than RECEIPT_MAX_AGE or dated in the
+    future; malformed entries are dropped."""
     out = [entry for entry in previous[-MAX_DELIVERED:]
-           if _valid_evidence(entry) and now - entry["ts"] <= RECEIPT_MAX_AGE]
+           if _valid_evidence(entry) and 0 <= now - entry["ts"] <= RECEIPT_MAX_AGE]
     keys = {(entry["room"], entry["id"], entry["seq"]) for entry in out}
+    added = False
     for it in emitted:
         msg = it["msg"]
         key = (it["room"], msg["id"], msg["seq"])
-        if (msg.get("kind") in RECEIPT_KINDS and render.addressed_by_name(msg, it.get("me")) and not it.get("digest")
-                and key not in keys):
+        if (msg.get("kind") in RECEIPT_KINDS and render.addressed_by_name(msg, it.get("me"))
+                and not it.get("digest") and not it.get("fallback") and key not in keys):
             keys.add(key)
             out.append({"room": it["room"], "id": msg["id"], "seq": msg["seq"], "ts": now})
-    return out[-MAX_DELIVERED:]
+            added = True
+    return out[-MAX_DELIVERED:], added
 
 
 def _receipts(fire, now):
@@ -560,12 +566,16 @@ def _deliver_locked(sid, meta, inp, event, env, reminder=None):
     # before its output reaches Claude, the next fire finds these lines missing from the transcript
     # and redelivers them; overflow renders next fire. An emitted ref keeps its exact line (bounded
     # by the render caps): ids repeat across rooms, so an id alone can't confirm a delivery.
+    delivered, added = _delivered(state["delivered"], emitted, time.time())
     emit = {"emitted": [dict(it["ref"], line=it["line"]) for it in emitted],
             "overflow": [it["ref"] for it in overflow] + fire.unread,
             "ahead": [ref for room in fire.rooms for ref in fire.ahead.get(room, ())],
             "receipts": fire.pending,
-            "delivered": _delivered(state["delivered"], emitted, time.time())}
-    if emit != state:
+            "delivered": state["delivered"]}
+    if emit != state or added:
+        # Evidence is pruned (aged out, future-dated, malformed) only in a save that happens anyway
+        # (#31): pruning alone never writes on an otherwise idle fire.
+        emit["delivered"] = delivered
         sessions.save_emit(sid, emit["emitted"], emit["overflow"], emit["ahead"], emit["receipts"],
                            emit["delivered"])
     for room, (new, was_reset, was_restarted) in new_cursors.items():

@@ -13,6 +13,8 @@ A release bumps the version in `plugin/.claude-plugin/plugin.json` and
 - After `/clear`, a session is no longer delivered its own earlier posts, `passnote read` shows its own earlier asks (`read --id` finds them), and an ask posted just before a `/clear` still gets its seen receipt (#6).
 - A `/clear` interrupted between moving membership and the session record no longer loses the messages waiting to be delivered, and a message re-sent after `/clear` is re-sent at most once (#7).
 - A second `/clear` before the first one's carry-over finished no longer drops the session's rooms; a carry no longer races a delivery; a stale process record no longer runs `ps` on every turn; the turn that finishes a delayed carry says who you are (#7).
+- The hook's output stays under its cap even when a forged message is too large to show at any clip; it is listed by id instead (#31).
+- A turn with nothing new no longer rewrites the session's delivery state just to age out old entries (#31).
 
 ## [0.2.0] - 2026-10-09
 

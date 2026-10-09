@@ -594,6 +594,14 @@ class AddressedClipTest(DeliverCase):
         post(self.a, "r", "r" * 1700, to=["bob"])
         self.assertIn("r" * 1700, self.context(self.deliver(self.b)))
 
+    def test_two_addressed_posts_with_the_larger_clip_overflow_then_arrive(self):
+        post(self.a, "r", "x" * 1500, kind="ask", to=["bob"])
+        post(self.a, "r", "y" * 1500, kind="ask", to=["bob"])
+        first = self.context(self.deliver(self.b))
+        self.assertIn("x" * 1500, first)
+        self.assertIn("1 not shown yet: a2", first)
+        self.assertIn("y" * 1500, self.context(self.deliver(self.b)))
+
 
 class FullTextDeliverTest(DeliverCase):
     def test_a_long_post_is_delivered_with_its_path(self):
@@ -1063,6 +1071,12 @@ class ReceiptTest(DeliverCase):
         self.assertLess(len(out.encode()), 8192)
         self.assertIn("passnote: seen by bob:", json.loads(out)["hookSpecificOutput"]["additionalContext"])
 
+    def test_a_pending_receipt_with_a_future_ts_is_dropped(self):
+        entry = {"room": "r", "id": "a1", "seq": 1, "ts": time.time() + 10 * 86400, "mode": "default", "to": ["bob"]}
+        sessions.save_emit(self.a, [], [], receipts=[entry])
+        self.deliver(self.a)
+        self.assertEqual(sessions.load_emit(self.a)["receipts"], [])
+
 
 class ThreadDeliverTest(DeliverCase):
     def setUp(self):
@@ -1200,8 +1214,9 @@ class DigestDeliverTest(DeliverCase):
         """Even an addressed ask, were it ever digested, is no evidence: its text never reached the model."""
         m = {"id": "a1", "seq": 1, "kind": "ask", "to": ["bob"]}
         emitted = [{"room": "r", "msg": m, "me": "bob", "digest": True}]
-        self.assertEqual(hook._delivered([], emitted, time.time()), [])
-        self.assertEqual(len(hook._delivered([], [dict(emitted[0], digest=False)], time.time())), 1)
+        self.assertEqual(hook._delivered([], emitted, time.time()), ([], False))
+        evidence, added = hook._delivered([], [dict(emitted[0], digest=False)], time.time())
+        self.assertEqual((len(evidence), added), (1, True))
 
     def test_digest_line_is_confirmed_from_the_transcript(self):
         path = os.path.join(self.tmp, "t.jsonl")
@@ -1258,6 +1273,39 @@ class DigestDeliverTest(DeliverCase):
         post(self.a, "r", "s1", thread="auth", mode="bypassPermissions")
         self.assertNotIn("#auth", self.context(self.deliver(self.b)))
 
+    def test_many_64_character_thread_names_stay_under_8_kb(self):
+        join(self.a, "r2", "alice")
+        join(self.b, "r2", "bob")
+        rooms.set_prefs(self.b, "r2", digest=True)
+        for room in ("r", "r2"):
+            for i in range(12):
+                post(self.a, room, "\U0001F600" * 300, thread="t" * 60 + f"{i:04d}")
+        raw = hook.main("PostToolBatch", hook_input(self.b), self.env(self.b))
+        self.assertLessEqual(len(raw.encode()), 8192)
+        ctx = self.context(json.loads(raw))
+        self.assertLessEqual(len(json.dumps(ctx)) - 2, render.MAX_CONTEXT_JSON)
+        self.assertLessEqual(sum(1 for line in ctx.split("\n") if " new (" in line), render.DIGEST_MAX_LINES)
+
+    def test_wholeness_uses_my_alias_in_each_room(self):
+        bert = new_sid()
+        join(bert, "r2", "bert")  # takes alias "b" in r2
+        join(self.b, "r2", "bob")  # bob is "bo" there
+        join(self.a, "r2", "alice")
+        rooms.set_prefs(self.b, "r2", digest=True)
+        post(self.a, "r2", "to b", kind="ans", re="b1")
+        post(self.a, "r2", "to bo", kind="ans", re="bo1")
+        lines = self.context(self.deliver(self.b)).split("\n")[1:]
+        self.assertIn("a2 alice→all ans re=bo1: to bo", lines)
+        self.assertIn("unthreaded: 1 new (a1), last alice: to b", lines)
+
+    def test_a_reply_to_my_post_from_before_clear_stays_whole(self):
+        post(self.b, "r", "my plan")  # b1, before the /clear
+        new = new_sid()
+        rooms.carry_over(self.b, new)
+        rooms.set_prefs(new, "r", threads=[])  # a subscription that filters every thread
+        post(self.a, "r", "ok", kind="ans", re="b1", thread="db")
+        self.assertIn("a2 alice→all ans re=b1 #db: ok", self.context(self.deliver(new)))
+
 
 class OwnAcrossClearTest(DeliverCase):
     def test_own_posts_from_before_clear_are_not_delivered_back(self):
@@ -1280,6 +1328,30 @@ class OwnAcrossClearTest(DeliverCase):
         store.save_members("r", members)
         post(self.b, "r", "from bob")
         self.assertIn("from bob", self.context(self.deliver(self.a)))
+
+class EmitStateTest(DeliverCase):
+    def test_a_fallback_line_is_not_delivery_evidence(self):
+        it = {"room": "r", "msg": {"id": "a1", "seq": 1, "kind": "ask", "to": ["bob"]}, "me": "bob", "fallback": True}
+        self.assertEqual(hook._delivered([], [it], time.time()), ([], False))
+
+    def test_ageing_evidence_alone_never_writes_on_an_idle_fire(self):
+        old = {"room": "r", "id": "x1", "seq": 1, "ts": time.time() - 2 * 86400}
+        sessions.save_emit(self.b, [], [], delivered=[old])
+        with mock.patch.object(sessions, "save_emit") as save:
+            self.assertIsNone(self.deliver(self.b))
+        save.assert_not_called()
+        self.assertEqual(sessions.load_emit(self.b)["delivered"], [old])
+        post(self.a, "r", "hi")
+        self.deliver(self.b)  # a save that happens anyway prunes it
+        self.assertEqual(sessions.load_emit(self.b)["delivered"], [])
+
+    def test_evidence_with_a_future_ts_is_pruned_in_the_next_save(self):
+        future = {"room": "r", "id": "x1", "seq": 1, "ts": time.time() + 10 * 86400}
+        sessions.save_emit(self.b, [], [], delivered=[future])
+        post(self.a, "r", "q", kind="ask", to=["bob"])
+        self.deliver(self.b)
+        self.assertEqual([entry["id"] for entry in sessions.load_emit(self.b)["delivered"]], ["a1"])
+
 
 
 if __name__ == "__main__":

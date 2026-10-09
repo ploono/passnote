@@ -458,6 +458,32 @@ class BuildTest(unittest.TestCase):
                 if overflow:
                     self.assertIn("not shown yet", context)
 
+    def test_a_first_line_too_large_even_at_min_clip_falls_back_to_a_fixed_shape(self):
+        wide = "\U0001F600" * 64
+        m = msg(id=wide, to=[wide] * 4, kind=wide, re=wide, text="x" * 2000)
+        items = [dict(item(m, room="r1"), display=wide), item(msg(id="b2", seq=2), room="r2")]
+        ctx, emitted, _ = render.build(items, "bob", 2000, 600)
+        self.assertLessEqual(len(json.dumps(ctx)) - 2, render.MAX_CONTEXT_JSON)
+        self.assertTrue(emitted[0].get("fallback"))
+        self.assertIn("(too large to show in this turn; passnote read --id ", emitted[0]["line"])
+        self.assertTrue(emitted[0]["line"].startswith("["))  # multi-room: the room prefix stays
+        self.assertEqual(len(emitted[0]["line"].splitlines()), 1)
+        self.assertFalse(any(it.get("fallback") for it in emitted[1:]))
+
+    def test_the_fallback_line_is_bounded_whatever_the_id(self):
+        wide = "\U0001F600" * 5000
+        line = render._fallback_line(dict(item(msg(id=wide)), display=wide), True)
+        self.assertLess(len(json.dumps(line)), 2500)
+
+    def test_the_overflow_line_still_names_an_id_after_the_first_line_shrinks(self):  # (pinning, #31 C2)
+        items = [dict(item(msg(id="a1", seq=1, to=["bob"], kind="ask", text="\U0001F600" * 1500)), clip=1500),
+                 item(msg(id="a2", seq=2, text="\U0001F600" * 100))]
+        ctx, emitted, overflow = render.build(items, "bob", 2000, 600)
+        self.assertEqual([it["msg"]["id"] for it in overflow], ["a2"])
+        self.assertIn("… (+", emitted[0]["line"])  # shrunk
+        self.assertIn("1 not shown yet: a2", ctx)
+        self.assertLessEqual(len(json.dumps(ctx)) - 2, render.MAX_CONTEXT_JSON)
+
 
 class ReceiptLineTest(unittest.TestCase):
     def test_format_groups_by_name(self):

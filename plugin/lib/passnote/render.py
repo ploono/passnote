@@ -230,6 +230,18 @@ def _reserve_for_overflow(n_items) -> int:
     return _json_len("\n" + _overflow_stub(n_items))
 
 
+def _fallback_line(it, multi) -> str:
+    """build's first line when even MIN_CLIP doesn't fit (#31): a fixed shape whose only data is the id
+    and the [room] prefix, each clipped to FIELD_CLIP before escaping, so it is at most ~2.4 KB as JSON
+    and always fits the first line's cap. It still counts as emitted, so the cursor moves on and a
+    forged line can't block a room; its text never reached the model, so it is never delivery evidence."""
+    msg_id = escape_text(clip_field(it["msg"].get("id", "?")))
+    line = f"{msg_id} (too large to show in this turn; passnote read --id {msg_id})"
+    if multi:
+        line = f"[{escape_text(clip_field(it.get('display') or it['room']))}] {line}"
+    return line
+
+
 def receipt_pair_ok(name, msg_id) -> bool:
     """Whether a (name, id) pair may appear in a receipt line: a valid member name and a message id
     of the full-text id shape. Both are ASCII and need no escaping."""
@@ -269,7 +281,8 @@ def build(items, me, budget, clip, tail=None):
     room) overrides `me`. Each emitted entry is a copy of its item plus "line", the exact line the
     context holds for it, so the hook can confirm that line, not a bare id, in the transcript.
     `tail` (a receipt line, passnote's own text) ends the context, counted in the budget and in
-    MAX_CONTEXT_JSON; with no items it is the whole context, with no header.
+    MAX_CONTEXT_JSON; with no items it is the whole context, with no header. The first line falls
+    back to a fixed shape (marked "fallback") when even MIN_CLIP doesn't fit.
 
     Items marked "digest" (#26) are grouped by (room, thread) and each group renders as one
     digest_line after the whole items: groups with a redelivered item first, then by earliest seq,
@@ -317,6 +330,7 @@ def build(items, me, budget, clip, tail=None):
             first_cap = pack_cap - (OVERFLOW_ID_SLACK if len(items) > 1 else 0)
             hi = it.get("clip", clip)
             line = rendered(it, hi)
+            extra = {}
             if hi > MIN_CLIP and size + _json_len("\n" + line) > first_cap:
                 lo = MIN_CLIP  # lo is the best known fit (or the floor); hi is known not to fit
                 while hi - lo > 1:
@@ -326,8 +340,10 @@ def build(items, me, budget, clip, tail=None):
                     else:
                         lo = mid
                 line = rendered(it, lo)
+            if size + _json_len("\n" + line) > first_cap:
+                line, extra = _fallback_line(it, multi), {"fallback": True}
             lines.append(line)
-            emitted.append(dict(it, line=line))
+            emitted.append(dict(it, line=line, **extra))
             used += 1 + len(line)
             size += _json_len("\n" + line)
             continue
