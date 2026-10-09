@@ -15,7 +15,7 @@ Amended by .scratch/passnote-phase-a/issues/01 (takeover only when gone; gc keep
 - v2.3 (2026-10-09) amends §5, §6, §7 and §10 from the fixes batch (#6, #7, #9, #31).
   - #9 (§7 step 4): a deleted and refilled log is a documented known limit.
   - #6 (§7 step 5, §10): a session's own lines include those from before a /clear (members.json prev_sids): never delivered back, shown by read, tracked for seen receipts.
-  - #7 (§5, §7): /clear carry-over hardening
+  - #7 (§5, §7): /clear carry-over hardening (serialized under the session lock, a time-budgeted retry, stale records dropped, a second /clear finishes the first, a reminder after a heal; items 2 and 4 deferred/wontfix)
 
 Approved by the author on 2026-09-27.
 
@@ -177,11 +177,11 @@ On every start, the hook rewrites `by-pid/<CLAUDE_PID>` = `{sid, pid_started_at}
 |---|---|
 | startup | Record only. |
 | resume | Same sid: keep the cursors. |
-| clear | Carry membership and cursors from the old sid to the new sid. SessionStart(clear) doesn't carry the old sid, so a **SessionEnd hook with matcher `clear`** records it first under `by-pid/<CLAUDE_PID>`. The SessionStart hook uses that record only when `pid_started_at` matches, which guards against pid reuse (A2). The carry moves the emit state before the new meta (the meta write is its commit point); emissions the old transcript doesn't confirm come back marked redelivered, so they are rendered again at most once. |
+| clear | Carry membership and cursors from the old sid to the new sid. SessionStart(clear) doesn't carry the old sid, so a **SessionEnd hook with matcher `clear`** records it first under `by-pid/<CLAUDE_PID>`. The SessionStart hook uses that record only when `pid_started_at` matches, which guards against pid reuse (A2). The carry moves the emit state before the new meta (the meta write is its commit point); emissions the old transcript doesn't confirm come back marked redelivered, so they are rendered again at most once. The carry runs under the new session's delivery `.lock`. SessionStart retries once after a busy lock if a whole retry fits 4.5 s of its 5 s timeout. A by-pid record whose start token is known and differs, or whose `prev_sid` is not a session id, is dropped. A SessionEnd(clear) of a session whose own carry never finished finishes it first, so the membership moves on. The delivery fire that finishes a carry also injects the "you are <name>…" line. |
 | compact | Same sid: keep the cursors. |
 | fork | New sid with no link to the parent, even though it inherits `session_title`. Not a member until it joins under its own name. |
 
-After clear, resume and compact, the hook injects one line: `passnote: you are <name> in rooms <…>; /passnote for the protocol`. It also re-surfaces pending addressed messages as one line (F5).
+After clear, resume and compact, the hook injects one line: `passnote: you are <name> in rooms <…>; /passnote for the protocol`. It also re-surfaces pending addressed messages as one line (F5). The line is at most 1,000 bytes as JSON; past that it is `passnote: you are a member of N room(s); passnote rooms lists them; /passnote for the protocol`.
 
 **Subagents.**
 - The hook exits immediately when `agent_id` is present in its input. `agent_type` alone (as in `--agent` main sessions) counts as the main thread.

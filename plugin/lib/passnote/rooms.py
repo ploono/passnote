@@ -12,8 +12,8 @@ import time
 from . import cursor, paths, sessions, store, transcript
 
 RENAME_LOCK_TIMEOUT = 1.0
-# Seconds carry_over waits for each room lock. SessionStart's 5 s timeout must fit an attempt and a
-# retry (hook.CARRY_BUDGET).
+# Seconds carry_over waits for its room locks, all of them together. SessionStart's 5 s timeout must
+# fit an attempt and a retry (hook.CARRY_BUDGET).
 CARRY_LOCK_TIMEOUT = 2.0
 # A member's delivery preferences in its members.json entry (#25): kept on a re-join by the
 # same session, moved whole by carry_over, dropped by leave and by a takeover.
@@ -239,17 +239,24 @@ def carry_over(old_sid, new_sid, lock_timeout=CARRY_LOCK_TIMEOUT) -> None:
     asks and messages from before the /clear still count as its own (store.member_for_sid).
     Safe to run again after a LockBusy or a kill part-way: a moved room is skipped, and the old
     session (the source of truth until its dir is removed at the end) still lists the rest. The
-    emit state moves before the new meta, whose write is the commit point."""
+    emit state moves before the new meta, whose write is the commit point.
+
+    lock_timeout bounds the wait for all the room locks together, so one attempt waits at most that
+    plus one meta-lock wait however many rooms it moves (hook.CARRY_BUDGET)."""
     import shutil
     old = sessions.load_meta(old_sid)
     if not old["rooms"]:
         return  # nothing to carry (already done): never blank the new session's rooms
     # First, so the moved member is never briefly "gone" (is_running is False without the dir).
     paths.makedirs(paths.session_dir(new_sid))
+    left = lock_timeout
     for room in old["rooms"]:
-        with store.room_lock(room, timeout=lock_timeout):
+        asked = time.monotonic()
+        with store.room_lock(room, timeout=max(left, 0.0)):
+            left -= time.monotonic() - asked
             members = store.load_members(room)
-            if old_sid in members:
+            moved = old_sid in members
+            if moved:
                 info = members.pop(old_sid)
                 earlier = [sid for sid in info.get("prev_sids", ()) if sid not in (old_sid, new_sid)] + [old_sid]
                 info["prev_sids"] = store.prev_sids(earlier)
@@ -258,7 +265,8 @@ def carry_over(old_sid, new_sid, lock_timeout=CARRY_LOCK_TIMEOUT) -> None:
         cur = cursor.load(old_sid, room)
         if cur:
             cursor.save(new_sid, room, cur)
-        store.append_event(room, {"type": "carry", "from_sid": old_sid, "sid": new_sid})
+        if moved:  # once per room: a retried carry skips the rooms it already moved
+            store.append_event(room, {"type": "carry", "from_sid": old_sid, "sid": new_sid})
 
     def inherit(new):
         for key in ("name", "name_source", "permission_mode", "ttl_seconds", "title"):
@@ -288,9 +296,10 @@ def _carry_emit(old_sid, new_sid, old_meta) -> None:
     path = old_meta.get("transcript_path")
     missing = transcript.unconfirmed(path if isinstance(path, str) else None, emitted)
     # Carried as overflow, to be rendered (and its line recorded) again, at most once more: marked
-    # redelivered, as _take_from_last_fire marks its own (#7). Old overflow was never emitted: unmarked.
+    # redelivered, as _take_from_last_fire marks its own (#7). A ref already marked was rendered again
+    # once: like _take_from_last_fire, never once more. Old overflow is carried as it is.
     unconfirmed = [dict({key: value for key, value in ref.items() if key != "line"}, redelivered=True)
-                   for ref in (emitted if missing is None else missing)]
+                   for ref in (emitted if missing is None else missing) if not ref.get("redelivered")]
 
     def merged(*lists):
         out, seen = [], set()

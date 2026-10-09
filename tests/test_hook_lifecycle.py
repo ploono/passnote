@@ -125,13 +125,19 @@ class LifecycleTest(HomeCase):
         token.assert_not_called()
         self.assertFalse(os.path.exists(paths.session_dir(sid)))
 
-    def test_session_end_of_an_unjoined_session_clears_a_stale_prev_sid(self):
+    def test_a_second_clear_before_any_fire_still_carries(self):
         self.run_hook("SessionEnd", self.b, reason="clear")
-        unjoined = new_sid()
-        self.run_hook("SessionEnd", unjoined, reason="clear")
-        self.assertNotIn("prev_sid", sessions.read_by_pid(self.pid))
-        self.assertIsNone(self.run_hook("SessionStart", new_sid(), source="clear"))
-        self.assertIn(self.b, store.load_members("r"))
+        mid, last = new_sid(), new_sid()
+        with mock.patch.object(store, "room_lock", side_effect=paths.LockBusy):
+            self.assertIsNone(self.run_hook("SessionStart", mid, source="clear"))  # the carry fails
+        self.run_hook("SessionEnd", mid, reason="clear")  # cleared again before any fire
+        out = self.run_hook("SessionStart", last, source="clear")
+        self.assertEqual(out["hookSpecificOutput"]["additionalContext"],
+                         "passnote: you are bob in rooms r; /passnote for the protocol")
+        members = store.load_members("r")
+        self.assertIn(last, members)
+        self.assertNotIn(self.b, members)
+        self.assertNotIn(mid, members)
 
     def test_pid_reuse_guard_blocks_carry_over(self):
         self.run_hook("SessionEnd", self.b, reason="clear")
@@ -141,6 +147,130 @@ class LifecycleTest(HomeCase):
         new = new_sid()
         self.assertIsNone(self.run_hook("SessionStart", new, source="clear"))
         self.assertIn(self.b, store.load_members("r"))
+
+    def test_session_end_keeps_the_prev_sid_when_its_heal_is_busy(self):
+        self.run_hook("SessionEnd", self.b, reason="clear")
+        mid, last = new_sid(), new_sid()
+        with mock.patch.object(store, "room_lock", side_effect=paths.LockBusy):
+            self.run_hook("SessionStart", mid, source="clear")
+            self.run_hook("SessionEnd", mid, reason="clear")
+        self.assertEqual(sessions.read_by_pid(self.pid)["prev_sid"], self.b)
+        self.run_hook("SessionStart", last, source="clear")
+        self.assertIn(last, store.load_members("r"))
+
+    def _stranded(self):
+        """bob cleared; SessionStart(clear) moved room r but not r2 (busy): a half-carried session."""
+        join(self.b, "r2", "bob")
+        self.run_hook("SessionEnd", self.b, reason="clear")
+        new = new_sid()
+        real = store.room_lock
+
+        def flaky(room, *args, **kwargs):
+            if room == "r2":
+                raise paths.LockBusy
+            return real(room, *args, **kwargs)
+
+        with mock.patch.object(store, "room_lock", flaky):
+            self.run_hook("SessionStart", new, source="clear")
+        return new
+
+    def test_a_heal_waits_for_the_delivery_lock(self):
+        new = self._stranded()
+        post(self.a, "r", "one")
+        fire = lambda: hook.main("PostToolBatch", hook_input(new), self.env(new, CLAUDE_PID=self.pid))  # noqa: E731
+        with sessions.session_lock(new):
+            self.assertEqual(fire(), "")
+        self.assertEqual(sessions.load_meta(new)["rooms"], [])
+        self.assertIn("one", fire())
+
+    def test_session_start_carry_waits_for_the_delivery_lock(self):
+        self.run_hook("SessionEnd", self.b, reason="clear")
+        new = new_sid()
+        with sessions.session_lock(new):
+            self.assertIsNone(self.run_hook("SessionStart", new, source="clear"))
+        self.assertIn(self.b, store.load_members("r"))
+        self.assertEqual(sessions.read_by_pid(self.pid)["prev_sid"], self.b)
+
+    def _once_busy(self, timeouts):
+        real = store.room_lock
+
+        def once_busy(room, *args, **kwargs):
+            timeouts.append(kwargs.get("timeout"))
+            if len(timeouts) == 1:
+                raise paths.LockBusy
+            return real(room, *args, **kwargs)
+
+        return once_busy
+
+    def test_a_retry_runs_when_a_whole_retry_still_fits_the_budget(self):
+        self.run_hook("SessionEnd", self.b, reason="clear")
+        timeouts, clock = [], iter([0.0, 2.1])
+        new = new_sid()
+        with mock.patch.object(store, "room_lock", self._once_busy(timeouts)), \
+                mock.patch.object(hook, "_clock", lambda: next(clock)):
+            out = self.run_hook("SessionStart", new, source="clear")
+        self.assertIn("you are bob", out["hookSpecificOutput"]["additionalContext"])
+        self.assertEqual(timeouts[0], rooms.CARRY_LOCK_TIMEOUT)
+        self.assertAlmostEqual(timeouts[1], hook.CARRY_BUDGET - 2.1 - sessions.META_LOCK_TIMEOUT)
+
+    def test_no_retry_once_the_budget_is_spent(self):
+        self.run_hook("SessionEnd", self.b, reason="clear")
+        timeouts, clock = [], iter([0.0, 3.1])
+        new = new_sid()
+        with mock.patch.object(store, "room_lock", self._once_busy(timeouts)), \
+                mock.patch.object(hook, "_clock", lambda: next(clock)):
+            self.assertIsNone(self.run_hook("SessionStart", new, source="clear"))
+        self.assertEqual(len(timeouts), 1)
+        self.assertIn(self.b, store.load_members("r"))
+
+    def test_a_mismatched_start_token_drops_the_prev_sid(self):
+        self.run_hook("SessionEnd", self.b, reason="clear")
+        record = sessions.read_by_pid(self.pid)
+        record["pid_started_at"] = "Thu Jan  1 00:00:00 1970"
+        paths.atomic_write_json(sessions.by_pid_path(self.pid), record)
+        new = new_sid()
+        hook.main("PostToolBatch", hook_input(new), self.env(new, CLAUDE_PID=self.pid))
+        self.assertNotIn("prev_sid", sessions.read_by_pid(self.pid))
+        self.assertIn(self.b, store.load_members("r"))
+
+    def test_a_failed_start_token_lookup_keeps_the_prev_sid(self):
+        self.run_hook("SessionEnd", self.b, reason="clear")
+        new = new_sid()
+        with mock.patch.object(sessions, "pid_started_at", return_value=None):
+            hook.main("PostToolBatch", hook_input(new), self.env(new, CLAUDE_PID=self.pid))
+        self.assertEqual(sessions.read_by_pid(self.pid)["prev_sid"], self.b)
+
+    def test_a_garbled_prev_sid_is_dropped_without_an_error(self):
+        paths.atomic_write_json(sessions.by_pid_path(self.pid),
+                                {"sid": self.b, "pid_started_at": sessions.pid_started_at(self.pid), "prev_sid": "../x"})
+        new = new_sid()
+        self.assertEqual(hook.main("PostToolBatch", hook_input(new), self.env(new, CLAUDE_PID=self.pid)), "")
+        self.assertNotIn("prev_sid", sessions.read_by_pid(self.pid))
+        self.assertFalse(os.path.exists(os.path.join(self.home, "errors.log")))
+
+    def test_the_healing_fire_says_who_you_are(self):
+        new = self._stranded()
+        post(self.a, "r", "one")
+        out = json.loads(hook.main("PostToolBatch", hook_input(new), self.env(new, CLAUDE_PID=self.pid)))
+        lines = out["hookSpecificOutput"]["additionalContext"].split("\n")
+        self.assertIn("passnote: you are bob in rooms r, r2; /passnote for the protocol", lines)
+        self.assertTrue(any(line.endswith("say: one") for line in lines))
+        # The next fire doesn't repeat it.
+        post(self.a, "r", "two")
+        again = hook.main("PostToolBatch", hook_input(new), self.env(new, CLAUDE_PID=self.pid))
+        self.assertNotIn("you are bob", again)
+
+    def test_the_reminder_has_a_fixed_shape_when_it_would_be_too_large(self):
+        for i in range(5):
+            room = f"big{i}"
+            join(self.b, room, "bob")
+            meta = store.load_meta(room)
+            meta["display"] = "\U0001F600" * 64
+            store.save_meta(room, meta)
+        line = hook._reminder(self.b, sessions.load_meta(self.b))
+        self.assertLessEqual(len(json.dumps(line)) - 2, hook.REMINDER_MAX_JSON)
+        self.assertEqual(line, "passnote: you are a member of 6 room(s); passnote rooms lists them; "
+                               "/passnote for the protocol")
 
     def test_session_end_records_the_pid_with_the_process_start_token(self):
         self.run_hook("SessionEnd", self.b, reason="clear")

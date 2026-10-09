@@ -344,7 +344,7 @@ class RoomsTest(HomeCase):
         self.assertEqual(sessions.load_meta(new)["rooms"], ["r"])
         self.assertFalse(os.path.exists(paths.session_dir(self.a)))
 
-    def test_carry_over_marks_unconfirmed_emissions_redelivered_and_leaves_overflow_unmarked(self):
+    def test_carry_over_marks_unconfirmed_emissions_redelivered_and_carries_overflow_as_it_is(self):
         rooms.join(self.a, "r", "alice", "/root")
         emitted = {"room": "r", "off": 0, "len": 10, "id": "b1", "line": "b1 bob→all say: hi"}
         overflow = {"room": "r", "off": 20, "len": 10, "id": "b2"}
@@ -353,6 +353,48 @@ class RoomsTest(HomeCase):
         rooms.carry_over(self.a, new)  # no transcript recorded: nothing confirms the emission
         self.assertEqual(sessions.load_emit(new)["overflow"],
                          [overflow, {"room": "r", "off": 0, "len": 10, "id": "b1", "redelivered": True}])
+
+    def test_carry_over_does_not_carry_an_emission_already_redelivered(self):
+        # Rendered again once already (marked by _take_from_last_fire): never once more (17a).
+        rooms.join(self.a, "r", "alice", "/root")
+        again = {"room": "r", "off": 0, "len": 10, "id": "b1", "line": "b1 bob→all say: hi", "redelivered": True}
+        sessions.save_emit(self.a, [again], [])
+        new = new_sid()
+        rooms.carry_over(self.a, new)  # no transcript recorded: nothing confirms the emission
+        self.assertEqual(sessions.load_emit(new)["overflow"], [])
+
+    def test_a_retried_carry_over_logs_one_carry_event_per_room(self):
+        rooms.join(self.a, "r", "alice", "/root")
+        new = new_sid()
+        real = sessions.update_meta
+
+        def busy_for_new(sid, fn):
+            if sid == new:
+                raise paths.LockBusy
+            return real(sid, fn)
+
+        with mock.patch.object(sessions, "update_meta", busy_for_new):
+            with self.assertRaises(paths.LockBusy):
+                rooms.carry_over(self.a, new)
+        rooms.carry_over(self.a, new)
+        carries = [ev for ev in store.read_events("r") if ev.get("type") == "carry"]
+        self.assertEqual([(ev["from_sid"], ev["sid"]) for ev in carries], [(self.a, new)])
+
+    def test_carry_over_lock_timeout_bounds_the_wait_for_all_its_room_locks(self):
+        rooms.join(self.a, "r1", "alice", "/root")
+        rooms.join(self.a, "r2", "alice", "/root")
+        real, timeouts = store.room_lock, []
+
+        def spy(room, *args, **kwargs):
+            timeouts.append(kwargs.get("timeout"))
+            return real(room, *args, **kwargs)
+
+        # The first room lock takes 0.5 s of the 0.7: the second may wait only what is left.
+        clock = mock.Mock(monotonic=mock.Mock(side_effect=[10.0, 10.5, 10.5, 10.5]))
+        with mock.patch.object(store, "room_lock", spy), mock.patch.object(rooms, "time", clock):
+            rooms.carry_over(self.a, new_sid(), lock_timeout=0.7)
+        self.assertEqual(timeouts[0], 0.7)
+        self.assertAlmostEqual(timeouts[1], 0.2)
 
     def test_carry_over_passes_its_lock_timeout_to_the_room_lock(self):
         rooms.join(self.a, "r", "alice", "/root")
