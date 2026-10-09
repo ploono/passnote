@@ -334,6 +334,29 @@ def _delivered(previous, emitted, now):
     return out[-MAX_DELIVERED:], added
 
 
+def _receipt_labels(fire):
+    """{room: label} for the receipt line: None for each room when the session is in one room (ids
+    only repeat across rooms), else the room's display when it is a valid name no other joined room's
+    label shares, and the room id otherwise. Room ids are unique valid names, so a shared label (two
+    displays alike, or a display equal to another room's id) falls back to the ids: one label for two
+    rooms would group their ids together."""
+    if len(fire.rooms) <= 1:
+        return {room: None for room in fire.rooms}
+    labels = {}
+    for room in fire.rooms:
+        display = fire.room(room)[1]
+        labels[room] = display if paths.valid_name(display) else room
+    while True:
+        counts = {}
+        for label in labels.values():
+            counts[label] = counts.get(label, 0) + 1
+        shared = [room for room, label in labels.items() if counts[label] > 1 and label != room]
+        if not shared:
+            return labels
+        for room in shared:
+            labels[room] = room
+
+
 def _receipts(fire, now):
     """(pairs, pending): the (name, id) pairs to report seen this fire, at most RECEIPTS_PER_FIRE
     and exactly those render.receipt_line shows, and the entries still pending.
@@ -346,13 +369,13 @@ def _receipts(fire, now):
     drops a name. An addressee who is gone or listed under an invalid sid is dropped for good. A
     seen pair the line has no room for stays for next fire."""
     pending, found, emits = [], [], {}
-    multi = len(fire.rooms) > 1  # ids repeat across rooms: label them only then
+    labels = _receipt_labels(fire) if fire.pending else {}
     for entry in fire.pending:
         if now - entry["ts"] > RECEIPT_MAX_AGE:
             continue
         room, msg_id, seq = entry["room"], entry["id"], entry["seq"]
-        members, display, inbound, _ = fire.room(room)
-        label = (display if paths.valid_name(display) else room) if multi else None
+        members, _, inbound, _ = fire.room(room)
+        label = labels.get(room)
         sid_of = {info["name"]: sid for sid, info in members.items()}
         kept = dict(entry, to=[])
         for name in dict.fromkeys(entry["to"]):

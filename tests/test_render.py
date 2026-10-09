@@ -481,6 +481,24 @@ class BuildTest(unittest.TestCase):
         line = render._fallback_line(dict(item(msg(id=wide)), display=wide), True)
         self.assertLess(len(json.dumps(line)), 2500)
 
+    def test_the_fallback_line_keeps_a_long_valid_id_whole(self):
+        for long_id in ("a" * 72 + "9" * 8, "a" * 72 + "9" * 18):  # 80 and 90 characters
+            with self.subTest(n=len(long_id)):
+                m = msg(id=long_id)
+                line = render._fallback_line(dict(item(m, room="r1"), display="api"), True)
+                self.assertEqual(line, f"[api] {long_id} (too large to show in this turn; "
+                                       f"passnote read --id {long_id})")
+                read_id = line.rsplit("passnote read --id ", 1)[1].rstrip(")")
+                self.assertEqual([x for x in (m,) if x["id"] == read_id], [m])  # read --id matches exactly
+                self.assertLess(len(json.dumps(line)), 2500)
+
+    def test_the_fallback_line_still_clips_a_forged_long_id(self):
+        forged = "a" * 100 + "1"  # past FULL_TEXT_ID_RE's 72 letters
+        line = render._fallback_line(item(msg(id=forged)), False)
+        clipped = render.clip_field(forged)
+        self.assertEqual(line, f"{clipped} (too large to show in this turn; passnote read --id {clipped})")
+        self.assertNotIn(forged, line)
+
     def test_the_overflow_line_still_names_an_id_after_the_first_line_shrinks(self):  # (pinning, #31 C2)
         items = [dict(item(msg(id="a1", seq=1, to=["bob"], kind="ask", text="\U0001F600" * 1500)), clip=1500),
                  item(msg(id="a2", seq=2, text="\U0001F600" * 100))]

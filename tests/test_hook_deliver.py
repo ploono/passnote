@@ -819,6 +819,32 @@ class ReceiptTest(DeliverCase):
         self.deliver(self.b)  # bob's turn delivers both
         self.assertIn("passnote: seen [r] by bob: a1; [r2] by bob: a1", self.context(self.deliver(self.a)))
 
+    def _two_room_receipt(self, displays):
+        join(self.a, "r2", "alice")
+        join(self.b, "r2", "bob")
+        for room, display in displays.items():
+            meta = store.load_meta(room)
+            meta["display"] = display
+            store.save_meta(room, meta)
+        post(self.a, "r", "q1", kind="ask", to=["bob"])
+        post(self.a, "r2", "q2", kind="ask", to=["bob"])
+        self.deliver(self.a)
+        self.deliver(self.b)
+        return self.context(self.deliver(self.a))
+
+    def test_a_unique_room_display_names_the_label(self):
+        self.assertIn("passnote: seen [api] by bob: a1; [web] by bob: a1",
+                      self._two_room_receipt({"r": "api", "r2": "web"}))
+
+    def test_rooms_sharing_a_display_are_labelled_by_room_id(self):
+        # one shared label would group both rooms' ids together: "[api] by bob: a1, a1"
+        self.assertIn("passnote: seen [r] by bob: a1; [r2] by bob: a1",
+                      self._two_room_receipt({"r": "api", "r2": "api"}))
+
+    def test_a_display_equal_to_another_rooms_id_is_labelled_by_room_id(self):
+        self.assertIn("passnote: seen [r] by bob: a1; [r2] by bob: a1",
+                      self._two_room_receipt({"r2": "r"}))
+
     def test_a_forged_room_display_falls_back_to_the_room_id_in_the_label(self):
         join(self.a, "r2", "alice")
         join(self.b, "r2", "bob")

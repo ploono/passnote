@@ -20,7 +20,7 @@ A release bumps the version in `plugin/.claude-plugin/plugin.json` and
 - Two `subscribe`/`unsubscribe` commands at once no longer lose one of the changes, and `who` lists at most 8 threads per member (#31).
 
 ### Changed
-- Seen receipts name the room (`passnote: seen [<room>] by <name>: <id>`) when you are in more than one room, since ids repeat across rooms (#31).
+- Seen receipts name the room (`passnote: seen [<room>] by <name>: <id>`) when you are in more than one room, since ids repeat across rooms; rooms sharing a display name are told apart by room id (#31).
 
 ## [0.2.0] - 2026-10-09
 

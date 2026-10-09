@@ -233,9 +233,15 @@ def _reserve_for_overflow(n_items) -> int:
 def _fallback_line(it, multi) -> str:
     """build's first line when even MIN_CLIP doesn't fit (#31): a fixed shape whose only data is the id
     and the [room] prefix, each clipped to FIELD_CLIP before escaping, so it is at most ~2.4 KB as JSON
-    and always fits the first line's cap. It still counts as emitted, so the cursor moves on and a
-    forged line can't block a room; its text never reached the model, so it is never delivery evidence."""
-    msg_id = escape_text(clip_field(it["msg"].get("id", "?")))
+    and always fits the first line's cap. An id of the full-text id shape (at most 90 ASCII characters)
+    stays whole, so `passnote read --id`, which matches exactly, finds it. It still counts as emitted,
+    so the cursor moves on and a forged line can't block a room; its text never reached the model, so
+    it is never delivery evidence."""
+    raw = it["msg"].get("id", "?")
+    if isinstance(raw, str) and store.FULL_TEXT_ID_RE.fullmatch(raw):
+        msg_id = raw
+    else:
+        msg_id = escape_text(clip_field(raw))
     line = f"{msg_id} (too large to show in this turn; passnote read --id {msg_id})"
     if multi:
         line = f"[{escape_text(clip_field(it.get('display') or it['room']))}] {line}"
