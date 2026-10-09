@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 
-from . import config, sessions
+from . import config, sessions, store
 
 PROMPTING = frozenset({"default", "acceptEdits", "plan"})
 SECRET_PATTERNS = (
@@ -62,14 +62,26 @@ def addressed(msg, me) -> bool:
     return to == "all" or (isinstance(to, list) and me is not None and me in to)
 
 
-def visibility(msg, sid, me, receiver_mode, inbound, env):
+def own(msg, sid, members=None) -> bool:
+    """Whether msg is the session `sid`'s own: posted under `sid`, or under an earlier id of the member
+    now listed as `sid` (its members.json prev_sids, kept across /clear). store.member_for_sid prefers
+    a member's own key, so a prev_sid naming another current member never makes that member's lines
+    mine. Without `members`, only the current sid counts."""
+    if msg.get("sid") == sid:
+        return True
+    found = store.member_for_sid(members, msg.get("sid"))
+    return found is not None and found[0] == sid
+
+
+def visibility(msg, sid, me, receiver_mode, inbound, env, members=None):
     """Whether the session `sid`, named `me`, gets `msg` (a store.valid_message):
-    ("skip", None) for its own lines, `status` lines and lines not addressed to it;
+    ("skip", None) for its own lines (with the room's `members`, also those from before a /clear),
+    `status` lines and lines not addressed to it;
     ("hold", reason) when inbound refuses or holds, the permission classes differ, or the
     receiver's mode is unknown (fail closed); else ("deliver", None).
     The delivery hook and `read` both decide through this, so they never disagree (M3/D2).
     `env` is the receiver process's own environment, never values from a log or config file."""
-    if msg.get("sid") == sid or msg.get("kind") == "status" or not addressed(msg, me):
+    if own(msg, sid, members) or msg.get("kind") == "status" or not addressed(msg, me):
         return "skip", None
     reason = content_hold(msg, receiver_mode, inbound, env)
     return ("hold", reason) if reason else ("deliver", None)

@@ -146,5 +146,19 @@ class VisibilityTest(HomeCase):
                          ("deliver", None))
 
 
+class OwnTest(unittest.TestCase):
+    def test_own_matches_my_current_and_earlier_session_ids(self):
+        members = {"S-NEW": {"name": "alice", "alias": "a", "prev_sids": ["S-OLD"]}, "S-B": {"name": "bob", "alias": "b"}}
+        self.assertTrue(trust.own({"sid": "S-NEW"}, "S-NEW", members))
+        self.assertTrue(trust.own({"sid": "S-OLD"}, "S-NEW", members))
+        self.assertFalse(trust.own({"sid": "S-B"}, "S-NEW", members))
+        self.assertFalse(trust.own({"sid": "S-OLD"}, "S-NEW", None))  # no members: only the current sid
+        self.assertTrue(trust.own({"sid": "S-NEW"}, "S-NEW", None))
+
+    def test_a_prev_sid_naming_a_current_member_is_not_mine(self):
+        members = {"S-NEW": {"name": "alice", "alias": "a", "prev_sids": ["S-B"]}, "S-B": {"name": "bob", "alias": "b"}}
+        self.assertFalse(trust.own({"sid": "S-B"}, "S-NEW", members))
+
+
 if __name__ == "__main__":
     unittest.main()

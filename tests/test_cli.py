@@ -6,7 +6,7 @@ import sys
 import unittest
 from unittest import mock
 
-from support import BIN, CliCase, new_sid
+from support import BIN, CliCase, join, new_sid, post
 from passnote import cli, cursor, paths, rooms, sessions, store
 
 
@@ -679,6 +679,37 @@ class DigestCliTest(CliCase):
         self.assertNotIn("digest", store.load_members("r")[self.b])
         self.assertEqual(self.run_cli(self.b, "digest", "maybe")[0], 2)
         self.assertEqual(self.run_cli(self.c, "digest", "on", "--room", "r")[0], 3)
+
+
+class ReadAcrossClearTest(CliCase):
+    def setUp(self):
+        super().setUp()
+        paths.ensure_home()
+        join(self.a, "r", "alice")
+        join(self.b, "r", "bob")
+        post(self.a, "r", "split step 2?", kind="ask", to=["bob"])
+        post(self.a, "r", "and step 3?", kind="ask", to=["bob"], mode="unknown")  # posted in the command that joined
+        self.new = new_sid()
+        rooms.carry_over(self.a, self.new)
+
+    def test_read_shows_my_own_asks_from_before_clear(self):
+        code, out, _ = self.run_cli(self.new, "read", "--last", "5")
+        self.assertEqual(code, 0)
+        self.assertIn("a1 alice→bob ask: split step 2?", out)
+
+    def test_read_id_finds_my_own_ask_from_before_clear(self):
+        code, out, _ = self.run_cli(self.new, "read", "--id", "a1")
+        self.assertEqual(code, 0)
+        self.assertEqual(out, "a1 alice→bob ask: split step 2?\n")
+
+    def test_read_id_finds_my_earlier_ask_after_a_mode_switch(self):
+        sessions.update_meta(self.new, lambda meta: meta.update(permission_mode="auto"))  # another class now
+        code, out, _ = self.run_cli(self.new, "read", "--id", "a1")
+        self.assertEqual((code, out), (0, "a1 alice→bob ask: split step 2?\n"))
+
+    def test_read_id_finds_my_earlier_ask_stamped_unknown(self):
+        code, out, _ = self.run_cli(self.new, "read", "--id", "a2")
+        self.assertEqual((code, out), (0, "a2 alice→bob ask: and step 3?\n"))
 
 
 if __name__ == "__main__":

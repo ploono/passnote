@@ -14,6 +14,7 @@ Amended by .scratch/passnote-phase-a/issues/01 (takeover only when gone; gc keep
   - #5 (§10): `/passnote:join [name]`, a skill only the human can run, joins without a model tool call. It hands the typed name to `join --name-stdin` as `[<name>]` through a quoted heredoc.
 - v2.3 (2026-10-09) amends §5, §6, §7 and §10 from the fixes batch (#6, #7, #9, #31).
   - #9 (§7 step 4): a deleted and refilled log is a documented known limit.
+  - #6 (§7 step 5, §10): a session's own lines include those from before a /clear (members.json prev_sids): never delivered back, shown by read, tracked for seen receipts.
 
 Approved by the author on 2026-09-27.
 
@@ -249,7 +250,7 @@ Readers open the file in binary mode and split on `b"\n"` only.
    - Cap the bytes read per fire at 256 KB.
    - Known limit (#9): a log deleted by hand and recreated is still deduped by the old `seq`. If it grows past a member's cursor seq before that member's next fire, the new messages at or below that seq are never delivered to it. passnote never deletes a log. A fix needs a log identity in the room meta and in every cursor (a format change), so it is deferred.
 5. Filter out:
-   - lines with my own `sid`;
+   - my own lines: my session id, or an earlier one from before a `/clear` (`prev_sids` in `members.json`; a `prev_sid` that names another current member counts as theirs);
    - lines whose `to` excludes me;
    - `status` lines;
    - held messages (§9);
@@ -293,7 +294,7 @@ Escaping is **a security control, not cosmetics** (A4). A raw newline let a forg
 - Bounds: at most 16 pending messages (the oldest are dropped), 4 addressees each, 24 hours (older entries are dropped unreported), and 6 (message, name) pairs shown per fire; the rest are shown next fire. With nothing pending, a fire does no extra I/O; with receipts pending, it reads one `emit.json` per addressee (and their recorded mode once seen).
 - Output: one line, `passnote: seen by bob: a12, a14; by carol: a12`, grouped by name. Only valid member names and ids of the full-text id shape appear, so the line is ASCII; it is at most 300 characters, and a pair it has no room for is shown next fire. It ends `additionalContext`, counted inside its 6,500-byte cap and the character budget; with no messages, it is the whole context, with no header.
 - It is not added to the systemMessage, so the 8 KB arithmetic (6,500 + 1,000) is unchanged; the human sees "seen" in `passnote who`. A receipt is never recorded for transcript confirmation: a lost one is not redelivered, so each is shown at most once.
-- Known gap: asks posted before a `/clear` carry the old session id, so the new session doesn't track them. Pending receipts already recorded are carried over.
+- Asks posted before a `/clear` are tracked like the session's own (`prev_sids`) when the new session's cursor passes them; pending receipts already recorded are carried over.
 - Known gap: delivery evidence for seen receipts is recorded when the line is emitted, not when the transcript confirms it, so a receipt can arrive early if another hook blocks the prompt.
 
 **Digest delivery (#26).** A hub member that would otherwise read every report in full can turn on digest mode: `passnote digest on` sets `digest: true` on its `members.json` entry (read this fire anyway, so no extra I/O; kept across `/clear`). Only the JSON value `true` turns it on: a forged value means off, which delivers more.
@@ -399,7 +400,7 @@ All commands take `--room`. The room is resolved as follows: the explicit `--roo
 | `leave` / `rooms` | Leave the room; list joined rooms |
 | `post [--to a,b] [--kind k] [--re id] [--thread name] [--wake\|--urgent]` | Post a message. Text is read from stdin; the skill uses a quoted heredoc, so the shell doesn't expand it. A reply without `--thread` keeps its ask's thread |
 | `claim "<what>"` / `claim --release <id>` | Claim work or release a claim |
-| `read [--id x \| --since id \| --last N] [--thread name]` | Filtered read that never moves the cursor. `--since` is exclusive. `--thread` filters first, and shows lines a subscription skipped |
+| `read [--id x \| --since id \| --last N] [--thread name]` | Filtered read that never moves the cursor. `--since` is exclusive. `--thread` filters first, and shows lines a subscription skipped. Shows your own messages, including those from before a `/clear` |
 | `subscribe [thread ...] [--all]` | Receive only these threads (plus unthreaded lines, props, replies to your posts and addressed lines); `--all` removes the filter; no arguments prints the setting (#25) |
 | `unsubscribe thread ...` | Drop threads from the subscription; refused when there is none (#25) |
 | `digest on\|off` | Digest mode: one line per thread with new activity; props, replies to your posts, `--wake` lines and asks, errs, props, naks and answers addressed to you still arrive whole (#26) |

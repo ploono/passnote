@@ -9,6 +9,9 @@ A release bumps the version in `plugin/.claude-plugin/plugin.json` and
 
 ## [Unreleased]
 
+### Fixed
+- After `/clear`, a session is no longer delivered its own earlier posts, `passnote read` shows its own earlier asks (`read --id` finds them), and an ask posted just before a `/clear` still gets its seen receipt (#6).
+
 ## [0.2.0] - 2026-10-09
 
 The first tagged release. Copies installed from `main` before it report 0.1.0.

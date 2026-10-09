@@ -489,10 +489,13 @@ def cmd_read(args, stdin, stdout, env):
                                           claude_settings.inbound(env.get("CLAUDE_PROJECT_DIR")))
         visible = []
         for msg in msgs:
-            if msg["sid"] == sid:  # visibility() skips the reader's own lines; read shows them
+            if trust.own(msg, sid, members):
+                # visibility() skips the reader's own lines, including those from before a /clear (#6);
+                # read shows them, as `who` does. No hold check: it would hide my own posts after a mode
+                # switch, or one stamped "unknown" (its fallback, the old session's mode, is gone).
                 visible.append(msg)
                 continue
-            verdict, reason = trust.visibility(msg, sid, me, meta.get("permission_mode"), inbound, env)
+            verdict, reason = trust.visibility(msg, sid, me, meta.get("permission_mode"), inbound, env, members)
             if verdict == "hold" and reason == "receiver mode unknown":
                 unrecorded += 1
             elif verdict == "hold":

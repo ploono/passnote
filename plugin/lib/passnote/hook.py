@@ -233,8 +233,8 @@ class _Fire:
         return self.prefs_cache[room]
 
     def verdict(self, room, msg):
-        _, _, inbound, me = self.room(room)
-        action, reason = trust.visibility(msg, self.sid, me, self.receiver_mode, inbound, self.env)
+        members, _, inbound, me = self.room(room)
+        action, reason = trust.visibility(msg, self.sid, me, self.receiver_mode, inbound, self.env, members)
         if action == "deliver":
             threads, _ = self.prefs(room)
             thread = render.thread_of(msg)
@@ -489,7 +489,7 @@ def _read_room(fire, room):
         key = (room, msg["id"], msg["seq"])
         if msg["seq"] <= dedupe or key in fire.seen or key in fire.ahead_keys:
             continue  # delivered before a reset, or taken already (last fire's emit state, or ahead)
-        if msg["sid"] == fire.sid:
+        if trust.own(msg, fire.sid, fire.room(room)[0]):
             fire.track(room, msg)
         action, reason = fire.verdict(room, msg)
         if action == "deliver":

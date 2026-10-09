@@ -1259,5 +1259,28 @@ class DigestDeliverTest(DeliverCase):
         self.assertNotIn("#auth", self.context(self.deliver(self.b)))
 
 
+class OwnAcrossClearTest(DeliverCase):
+    def test_own_posts_from_before_clear_are_not_delivered_back(self):
+        post(self.a, "r", "mine")  # past alice's cursor: she had no fire after posting
+        new = new_sid()
+        rooms.carry_over(self.a, new)
+        self.assertIsNone(self.deliver(new))
+
+    def test_an_ask_posted_just_before_clear_still_gets_its_seen_receipt(self):
+        post(self.a, "r", "q", kind="ask", to=["bob"])
+        new = new_sid()
+        rooms.carry_over(self.a, new)
+        self.deliver(new)     # its cursor passes a1: a pending receipt is recorded
+        self.deliver(self.b)  # bob's turn delivers a1
+        self.assertIn("passnote: seen by bob: a1", self.context(self.deliver(new)))
+
+    def test_a_prev_sid_naming_a_current_member_never_hides_its_lines(self):
+        members = store.load_members("r")
+        members[self.a]["prev_sids"] = [self.b]
+        store.save_members("r", members)
+        post(self.b, "r", "from bob")
+        self.assertIn("from bob", self.context(self.deliver(self.a)))
+
+
 if __name__ == "__main__":
     unittest.main()
