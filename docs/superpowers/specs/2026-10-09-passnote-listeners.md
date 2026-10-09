@@ -88,12 +88,14 @@ Added to `hooks/hooks.json`:
 ```
 The second entry is Phase L3 only. `guard.sh` needs `Listen` and `StopListen` case arms: today it ends in `*) exit 0`, so an unknown event name silently does nothing.
 
+The two guards are **mutually exclusive**: `Listen` exits when `PASSNOTE_LISTEN=headless`, and `StopListen` runs only when it is set. Otherwise both would fire on one `Stop`, the async `Listen` could take the per-session listener lock first, and `StopListen` would exit without the synchronous delivery of §4.6.
+
 ### 4.3 Wake paths
 
 | Path | Who pays | Sessions | Wakes idle? | Gate |
 |---|---|---|---|---|
 | **Sender doorbell** (today) | sender: one tool call, 11–16k | all with an inbox (A7) | yes | none: Phase L1 |
-| **asyncRewake listener** | nobody until a wake | interactive and headless (D1) | to be measured | D1, D2 |
+| **asyncRewake listener** | nobody until a wake | interactive, and `-p` sessions not launched with `PASSNOTE_LISTEN=headless` (D1) | to be measured | D1, D2 |
 | **Plugin monitor** | nobody until a wake | interactive only; not on Bedrock, Vertex or Foundry | to be measured | D4 |
 | **Headless Stop listener** | nobody until a wake | `claude -p` workers launched for it | keeps the worker's turn open | D3 |
 | **Direct-socket doorbell** | nobody: rung from the sender's hook | all with an inbox | yes | D5 |
@@ -134,7 +136,7 @@ It carries ids, kinds and names, never text. The skill tells the model: on a wak
 
 **Budgets:** `listen_max_wakes_per_hour` (default 6) per member, on top of the per-sender breaker. A notice that would exceed the budget is dropped and logged as a `listen-capped` event; the message just waits.
 
-### 4.5 asyncRewake listener (interactive and headless; Phase L2)
+### 4.5 asyncRewake listener (all sessions except `PASSNOTE_LISTEN=headless`; Phase L2)
 
 - A plugin hook entry on `Stop` (the turn ends, so the session goes idle) with `asyncRewake: true` and the longest timeout D1 shows is accepted. Its sh guard exits unless `sessions/$sid/listen` exists and the session's class allows it (§6.2). Then it runs `passnote listen --run rewake`.
 - Wake: print the notice and exit 2, which D1 must show starts a turn in an idle session.
@@ -244,7 +246,7 @@ On macOS and Linux, on the minimum Claude Code version and the newest release. R
 
 ## 9. Open questions (recommendations marked)
 
-1. **Which listener first?** *Recommended:* asyncRewake on `Stop`, if D1 shows a timeout of at least 1 hour and a rewake that starts a turn. It covers interactive and headless sessions on every provider. The plugin monitor is the fallback for interactive sessions only if D1 fails. Don't ship both.
+1. **Which listener first?** *Recommended:* asyncRewake on `Stop`, if D1 shows a timeout of at least 1 hour and a rewake that starts a turn. It covers interactive and `-p` sessions on every provider; workers launched with `PASSNOTE_LISTEN=headless` use the Stop listener instead. The plugin monitor is the fallback for interactive sessions only if D1 fails. Don't ship both.
 2. **Do wake rules wake cold members?** *Recommended:* no by default; `--even-cold` per rule. A cold wake re-writes the whole context cache, and the rule's owner is the one who should choose that cost. The field coordinator would set it on its overnight rule.
 3. **Opt-in for listeners in non-prompting sessions.** *Recommended:* a separate launch variable, `PASSNOTE_LISTEN=1`, not `PASSNOTE_ALLOW_BYPASS` and never config (review F1).
 4. **Names.** *Recommended:* the command `wake-on`, and the glossary terms "wake rule", "wake path", "listener" and "wake notice". `watch` is taken by the human view, and "subscribe" by #25.
