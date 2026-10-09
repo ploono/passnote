@@ -181,7 +181,7 @@ def join(sid, room, name, root, display=None, now=None) -> dict:
 
 def set_prefs(sid, room, threads=_KEEP, digest=_KEEP) -> dict:
     """Set this member's delivery preferences in members.json (None or False removes the key; [] is
-    a filter that lets only unthreaded and addressed lines through). Exit 3 if not a member."""
+    a filter that lets only unthreaded lines, props, addressed lines and replies to your posts through). Exit 3 if not a member."""
     with store.room_lock(room):
         members = store.load_members(room)
         if sid not in members:

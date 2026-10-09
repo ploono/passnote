@@ -66,7 +66,7 @@ def build_parser():
     p.add_argument("--thread", metavar="NAME", help="only this thread's messages")
     p.set_defaults(func=cmd_read, needs_home=True)
 
-    p = sub.add_parser("subscribe", help="receive only these threads (plus unthreaded lines and lines to you)")
+    p = sub.add_parser("subscribe", help="receive only these threads (plus unthreaded lines, props, lines to you and replies to your posts)")
     p.add_argument("threads", nargs="*", metavar="THREAD")
     p.add_argument("--all", action="store_true", help="every thread again")
     p.add_argument("--room")
@@ -334,7 +334,7 @@ def _threads_line(room, threads) -> str:
     if threads is None:
         shown = "all"
     else:
-        shown = ", ".join(sorted(threads)) or "none (you still get unthreaded lines and lines addressed to you)"
+        shown = ", ".join(sorted(threads)) or "none (you still get unthreaded lines, props, lines addressed to you and replies to your posts)"
     return f"threads in {room}: {shown}\n"
 
 
@@ -370,8 +370,8 @@ def cmd_digest(args, stdin, stdout, env):
     on = args.state == "on"
     rooms.set_prefs(sid, room, digest=on or None)
     if on:
-        stdout.write(f"digest on in {room}: one line per thread; props, replies to your posts, and asks, errs, "
-                     "naks, answers and --wake lines to you arrive whole\n")
+        stdout.write(f"digest on in {room}: one line per thread; props, replies to your posts and --wake lines, "
+                     "and asks, errs, naks and answers to you, arrive whole\n")
     else:
         stdout.write(f"digest off in {room}\n")
     return 0

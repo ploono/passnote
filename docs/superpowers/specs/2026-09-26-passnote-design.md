@@ -107,7 +107,7 @@ repo/
 **Storage root.**
 - `PASSNOTE_HOME`, default `${XDG_STATE_HOME:-~/.local/state}/passnote`. It must be on a local filesystem (F39).
 - Why outside `~/.claude` (spike A5): with the sandbox on, Bash can write to neither location without an `allowWrite` entry, and most of `~/.claude` is a protected path.
-- Hooks run outside the sandbox and need no configuration. Only the CLI commands run from Bash (`join`, `post`, `claim`, `leave`, `subscribe`, `unsubscribe`) need `allowWrite`.
+- Hooks run outside the sandbox and need no configuration. Only the CLI commands run from Bash (`join`, `post`, `claim`, `leave`, `subscribe`, `unsubscribe`, `digest`) need `allowWrite`.
 - The README ships this snippet (verified in A5):
   ```json
   {"sandbox":{"enabled":true,"filesystem":{"allowWrite":["~/.local/state/passnote"]}}}
@@ -119,7 +119,7 @@ config.json                           global settings (§10)
 rooms/<room>/log.jsonl                append-only messages
 rooms/<room>/files/<id>.txt           full text of a post over text_max_chars
 rooms/<room>/events.jsonl             append-only room events: join/leave, wake decisions, holds (for watch/who)
-rooms/<room>/members.json             sid → {name, alias, joined_at, root, [threads], [digest]}; rewritten at join/leave and by subscribe/unsubscribe
+rooms/<room>/members.json             sid → {name, alias, joined_at, root, [threads], [digest]}; rewritten at join/leave and by subscribe/unsubscribe/digest
 rooms/<room>/meta.json                {root, created_at}
 rooms/<room>/config.json              room settings (§10)
 rooms/<room>/.lock                    room lock, held only around append+seq and members rewrite
@@ -290,10 +290,11 @@ Escaping is **a security control, not cosmetics** (A4). A raw newline let a forg
 - Output: one line, `passnote: seen by bob: a12, a14; by carol: a12`, grouped by name. Only valid member names and ids of the full-text id shape appear, so the line is ASCII; it is at most 300 characters, and a pair it has no room for is shown next fire. It ends `additionalContext`, counted inside its 6,500-byte cap and the character budget; with no messages, it is the whole context, with no header.
 - It is not added to the systemMessage, so the 8 KB arithmetic (6,500 + 1,000) is unchanged; the human sees "seen" in `passnote who`. A receipt is never recorded for transcript confirmation: a lost one is not redelivered, so each is shown at most once.
 - Known gap: asks posted before a `/clear` carry the old session id, so the new session doesn't track them. Pending receipts already recorded are carried over.
+- Known gap: delivery evidence for seen receipts is recorded when the line is emitted, not when the transcript confirms it, so a receipt can arrive early if another hook blocks the prompt.
 
 **Digest delivery (#26).** A hub member that would otherwise read every report in full can turn on digest mode: `passnote digest on` sets `digest: true` on its `members.json` entry (read this fire anyway, so no extra I/O; kept across `/clear`). Only the JSON value `true` turns it on: a forged value means off, which delivers more.
 - **Whole lines.** These still render as their own line: every `prop` (silence counts as consent once the cursor passes it, so a digested prop would be consent never given); every reply to one of the member's own posts (`re` is its alias followed by digits, the same check as the thread filter); anything posted with `--wake`; and an `ask`, `err`, `prop`, `nak` or `ans` addressed to it by name.
-- **Digested.** Everything else that step 5 lets through: broadcast `say`, `done`, `claim`, `ask`, and `ans`/`nak` to others; addressed `say`, `done` and `claim`. The thread filter runs first, so a skipped thread is never counted, and a held message is never counted in a digest.
+- **Digested.** Everything else that step 5 lets through, e.g. broadcast `say`, `done`, `claim`, `err`, `status`, `ask`, and `ans`/`nak` to others; addressed `say`, `done` and `claim`. The thread filter runs first, so a skipped thread is never counted, and a held message is never counted in a digest.
 - **Format.** One line per (room, thread) with new activity, after the whole lines: `#<thread>: <n> new (<first id>..<last id>), last <sender>: <gist>`, or `unthreaded: …` for lines without a thread; one message shows `(<id>)`. The gist is the newest message's text, at most 60 rendered characters. The `[room]` prefix applies as for other lines. Groups with a redelivered item come first, then by earliest seq.
 - **Bounds.** At most 8 digest lines per fire; the items of further groups overflow, named on the overflow line, and come next fire. Digest lines count inside the character budget and the 6,500-byte cap. The first line of a fire, whole or digest, is always emitted, so a fire always makes progress.
 - **Confirmation.** Every digested item's emitted ref records the digest line as its `line`, so one transcript line confirms the whole group. An unconfirmed group comes back once, marked redelivered, as a digest line again, never as whole messages. A digested message is never delivery evidence for a seen receipt (its text didn't reach the model); addressed asks and props always arrive whole anyway.

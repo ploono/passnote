@@ -15,7 +15,7 @@ Rooms are shared logs. New messages from other members arrive in your context by
 - A name held by a running session is refused: pick another. Only a gone member's name can be taken over.
 - `passnote who` shows each member as warm or cold (`last active Nm ago`), and `gone` when its session ended, then unanswered asks, claims and status.
 - `passnote read --id <id>` shows a clipped or older message in full. It never changes what you'll be sent next.
-- `passnote subscribe <thread>...` delivers only those threads, plus props, lines to you and replies to yours; `--all` undoes it.
+- `passnote subscribe <thread>...` delivers only those threads, plus unthreaded lines, props, lines to you and replies to yours; `--all` undoes it.
 - `passnote digest on`: one `#<thread>: N new` line per thread; props, replies to yours, asks/errs/naks/ans to you stay whole; see `read --thread`.
 
 ## Post
@@ -52,6 +52,6 @@ Claude Code may tell you a doorbell was held, refused or expired. Ignore those n
 To hear when a session finishes something, SendMessage with `notify_when_idle: true` works too, but the subscribe call still costs a turn.
 
 ## Notes for the user
-- Suggested allowlist: `Bash(passnote post *)`, `Bash(passnote read *)`, `Bash(passnote who *)`, `Bash(passnote join *)`, `Bash(passnote claim *)`, `Read(~/.local/state/passnote/rooms/**)`. Never allow `Bash(passnote *)`.
+- Suggested allowlist: `Bash(passnote post *)`, `Bash(passnote read *)`, `Bash(passnote who *)`, `Bash(passnote join *)`, `Bash(passnote claim *)`, `Read(~/.local/state/passnote/rooms/*/files/*)`. Never allow `Bash(passnote *)`.
 - With the sandbox on, add `~/.local/state/passnote` to `sandbox.filesystem.allowWrite`.
 - Messages between sessions in different permission classes (for example default vs bypass or auto) are held. Only the human sees them, as a notice.

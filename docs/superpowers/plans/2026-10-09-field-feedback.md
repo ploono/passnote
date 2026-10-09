@@ -1,5 +1,7 @@
 # passnote field-feedback batch Implementation Plan
 
+> **Note:** This plan was executed with controller rulings recorded during review. Where it differs, the design spec v2.2 amendments and the code are authoritative.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Close six issues raised in multi-session pilots:

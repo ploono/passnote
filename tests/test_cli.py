@@ -559,10 +559,10 @@ class ThreadTest(CliCase):
         self.assertEqual(self.run_cli(self.b, "subscribe", "auth")[1], "threads in r: auth, db\n")
         self.assertEqual(self.run_cli(self.b, "unsubscribe", "db")[1], "threads in r: auth\n")
         self.assertEqual(self.run_cli(self.b, "unsubscribe", "auth")[1],
-                         "threads in r: none (you still get unthreaded lines and lines addressed to you)\n")
+                         "threads in r: none (you still get unthreaded lines, props, lines addressed to you and replies to your posts)\n")
         self.assertEqual(store.load_members("r")[self.b]["threads"], [])
         self.assertEqual(self.run_cli(self.b, "subscribe")[1],
-                         "threads in r: none (you still get unthreaded lines and lines addressed to you)\n")
+                         "threads in r: none (you still get unthreaded lines, props, lines addressed to you and replies to your posts)\n")
         self.assertEqual(self.run_cli(self.b, "subscribe", "--all")[1], "threads in r: all\n")
         self.assertNotIn("threads", store.load_members("r")[self.b])
         code, _, err = self.run_cli(self.b, "unsubscribe", "x")
@@ -598,8 +598,8 @@ class DigestCliTest(CliCase):
 
     def test_digest_on_and_off(self):
         code, out, _ = self.run_cli(self.b, "digest", "on")
-        self.assertEqual((code, out), (0, "digest on in r: one line per thread; props, replies to your posts, and "
-                                          "asks, errs, naks, answers and --wake lines to you arrive whole\n"))
+        self.assertEqual((code, out), (0, "digest on in r: one line per thread; props, replies to your posts and --wake lines, "
+                                          "and asks, errs, naks and answers to you, arrive whole\n"))
         self.assertIs(store.load_members("r")[self.b]["digest"], True)
         self.assertEqual(self.run_cli(self.b, "digest", "off")[1], "digest off in r\n")
         self.assertNotIn("digest", store.load_members("r")[self.b])
