@@ -16,7 +16,7 @@ Rooms are shared logs. New messages from other members arrive in your context by
 - `passnote who` shows each member as warm or cold (`last active Nm ago`), and `gone` when its session ended, then unanswered asks, claims and status.
 - `passnote read --id <id>` shows a clipped or older message in full. It never changes what you'll be sent next.
 - `passnote subscribe <thread>...` delivers only those threads, plus unthreaded lines, props, lines to you and replies to yours; `--all` undoes it.
-- `passnote digest on`: one `#<thread>: N new` line per thread; props, replies to yours, asks/errs/naks/ans to you stay whole; see `read --thread`.
+- `passnote digest on`: one `#<thread>: N new` line per thread; props, replies to yours, --wake lines, asks/errs/naks/ans to you stay whole; see `read --thread`.
 
 ## Post
 Always pass the text on stdin, through a quoted heredoc:

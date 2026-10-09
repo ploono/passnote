@@ -367,7 +367,7 @@ def addressed_by_name(msg, me) -> bool:
 - **Cleanup:** the file goes with the room. passnote has no room deletion today; `uninstall --purge` removes `rooms/`, files included. There is no separate expiry, consistent with the log (log rotation is a spec non-goal). The README says so.
 - **The delivered line** is the clipped text, then `… (+N chars: full text in <absolute path>)`, where N = `full_chars` minus the characters shown.
 - **`read --id`** prints the stored 4,000 characters, then the same note. It never prints the file, because Bash output is truncated around 30k characters. The reader opens the file with the Read tool.
-- **Permissions:** a Read outside the project may prompt in default mode. README's suggested permissions gain `Read(~/.local/state/passnote/rooms/**)`. Bash's sandbox doesn't apply to Read.
+- **Permissions:** a Read outside the project may prompt in default mode. README's suggested permissions gain `Read(~/.local/state/passnote/rooms/*/files/*)`. Bash's sandbox doesn't apply to Read.
 - **`post` output line 1** becomes `ok <id> (full text: <path>)` for a long post, and stays `ok <id>` otherwise. The WAKE and WAIT lines are unchanged.
 - **Valid messages:** `full_chars` must be absent, None, or an int ≥ 0 that is not a bool. A message whose `full_chars` is no larger than its text length renders as an ordinary message.
 
@@ -642,8 +642,8 @@ Add `import re` to store.py. In `valid_message`, add:
 - [ ] **Step 4: Run them and see them pass.** Use the same command as Step 2.
 
 - [ ] **Step 5: Update the docs.**
-  - SKILL.md Rules: replace "For anything over about 4,000 characters, write a file and post its path." with "Over 4,000 characters, the full text is saved to a file and the line carries its path; read it with Read." This is about +20 bytes. In "Notes for the user", append `Read(~/.local/state/passnote/rooms/**)` to the allowlist (+42 bytes).
-  - README "How it works": add the bullet "A post over 4,000 characters (up to 100,000) keeps its first 4,000 in the log; the whole text goes to `rooms/<room>/files/<id>.txt` (mode 0600), and the delivered line ends with that path. The file is removed with the room's data (`passnote uninstall --purge`)." Add `Read(~/.local/state/passnote/rooms/**)` to "Suggested permissions" in Setup notes.
+  - SKILL.md Rules: replace "For anything over about 4,000 characters, write a file and post its path." with "Over 4,000 characters, the full text is saved to a file and the line carries its path; read it with Read." This is about +20 bytes. In "Notes for the user", append `Read(~/.local/state/passnote/rooms/*/files/*)` to the allowlist (+42 bytes).
+  - README "How it works": add the bullet "A post over 4,000 characters (up to 100,000) keeps its first 4,000 in the log; the whole text goes to `rooms/<room>/files/<id>.txt` (mode 0600), and the delivered line ends with that path. The file is removed with the room's data (`passnote uninstall --purge`)." Add `Read(~/.local/state/passnote/rooms/*/files/*)` to "Suggested permissions" in Setup notes.
   - Spec:
     - §4 storage tree: `rooms/<room>/files/<id>.txt  full text of a post over text_max_chars`.
     - §6 `text`: "capped at 4,000 characters in the log; a longer post (up to `full_text_max_chars`, 100,000) stores its first 4,000 plus `full_chars`, and its whole text in `files/<id>.txt`, written under the room lock before the log line. The path is derived from room and id, never stored (#27)."
