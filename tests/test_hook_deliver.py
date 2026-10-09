@@ -948,6 +948,19 @@ class ReceiptTest(DeliverCase):
         self.assertIn("passnote: seen by bob: a1", ctx)
         self.assertEqual(self.errors_log(), [])
 
+    def test_a_forged_hold_event_does_not_stop_delivery(self):
+        post(self.a, "r", "q", kind="ask", to=["bob"])
+        self.deliver(self.a)
+        self.deliver(self.b)
+        store.append_event("r", {"type": "hold", "id": ["x"], "to_sid": {"a": 1}})
+        with open(store.events_path("r"), "ab") as fh:
+            fh.write(b"[1, 2]\n\"x\"\n")
+        post(self.b, "r", "still here")
+        ctx = self.context(self.deliver(self.a))
+        self.assertIn("still here", ctx)
+        self.assertIn("passnote: seen by bob: a1", ctx)
+        self.assertEqual(self.errors_log(), [])
+
     def test_no_receipt_work_when_nothing_is_pending(self):
         post(self.b, "r", "hi")
         with mock.patch.object(cursor, "load", wraps=cursor.load) as spy:

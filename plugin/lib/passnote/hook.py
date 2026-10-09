@@ -291,8 +291,10 @@ def _receipts(fire, now):
                                   inbound, {}):
                 continue
             if room not in holds:
-                holds[room] = {(ev.get("id"), ev.get("to_sid")) for ev in store.read_events(room)
-                               if ev.get("type") == "hold"}
+                # Any member can append an event: only str fields make a key (a list would raise).
+                holds[room] = {(ev["id"], ev["to_sid"]) for ev in store.read_events(room)
+                               if ev.get("type") == "hold" and isinstance(ev.get("id"), str)
+                               and isinstance(ev.get("to_sid"), str)}
             if any((msg_id, sid) in holds[room] for sid in [target] + list(members[target].get("prev_sids") or ())):
                 continue
             kept["to"].append(name)  # until the line shows it
