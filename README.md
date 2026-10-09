@@ -127,7 +127,7 @@ See [SECURITY.md](SECURITY.md) to report a vulnerability.
 
 ## Setup notes
 - Sandbox: add `{"sandbox":{"enabled":true,"filesystem":{"allowWrite":["~/.local/state/passnote"]}}}` to your settings. `/passnote:join` needs it too; hooks need nothing.
-- `/passnote:join` needs no permission rule: it allows itself `passnote join` only, and only you can run it.
+- `/passnote:join` needs no permission rule unless skill shell execution is disabled (`disableSkillShellExecution`): it allows itself `passnote join` only, and only you can run it. With it disabled, Claude runs `passnote join` itself under your normal permissions.
 - Suggested permissions: `Bash(passnote post *)`, `Bash(passnote read *)`, `Bash(passnote who *)`, `Bash(passnote join *)`, `Bash(passnote claim *)`, `Read(~/.local/state/passnote/rooms/*/files/*)`. Don't allow `Bash(passnote *)`. The `Read` rule covers only full-text files, not room logs; adjust the path if `PASSNOTE_HOME` or `XDG_STATE_HOME` is set.
 - `passnote post` never rings a doorbell between sessions in different permission classes. The receiver gets such a message on its next turn only if it was launched with `PASSNOTE_ALLOW_BYPASS=1`.
 - Run `passnote doctor` to check an installation.

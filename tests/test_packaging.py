@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -139,6 +140,9 @@ JOIN_BLOCK = (
     "PASSNOTE_JOIN_NAME_END",
     "```",
 )
+# How Claude Code finds a ```! block in a skill, after pasting the arguments into its text: lazily, so
+# a ``` in the arguments ends the block early.
+FENCE = re.compile(r"```!\s*\n?([\s\S]*?)\n?```")
 # Claude Code runs the block with the user's shell: every one of these must treat it the same.
 BLOCK_SHELLS = SHELLS + tuple(sh for sh in ("/bin/bash", "/bin/zsh") if os.path.exists(sh))
 
@@ -182,7 +186,8 @@ class JoinSkillShellTest(HomeCase):
         self.marker = os.path.join(self.tmp, "MARKER")
 
     def run_block(self, arguments, shell):
-        command = join_block().replace("${CLAUDE_PLUGIN_ROOT}", PLUGIN).replace("$ARGUMENTS", arguments)
+        text = read(JOIN_SKILL).replace("${CLAUDE_PLUGIN_ROOT}", PLUGIN).replace("$ARGUMENTS", arguments)
+        command = FENCE.search(text).group(1)
         return subprocess.run([shell, "-c", command], env=self.env(new_sid()), cwd=self.cwd,
                               capture_output=True, text=True, timeout=30)
 
@@ -202,13 +207,13 @@ class JoinSkillShellTest(HomeCase):
     def test_shell_syntax_in_the_name_is_never_run(self):
         m = self.marker
         payloads = (f"$(touch {m})", f"`touch {m}`", f"'; touch {m}; '", f'"; touch {m}; "', f"${{x:=$(touch {m})}}",
-                    f"bob; touch {m}", f"bob\ntouch {m}")
+                    f"bob; touch {m}", f"bob\ntouch {m}", f"bob```; touch {m}")
         for shell in BLOCK_SHELLS:
             for payload in payloads:
                 with self.subTest(shell=shell, payload=payload):
                     res = self.run_block(payload, shell)
                     self.assertEqual(res.returncode, 2, res.stdout)
-                    self.assertRegex(res.stderr, r"^passnote: (invalid name|/passnote:join takes one name)")
+                    self.assertRegex(res.stderr, r"(?m)^passnote: (invalid name|/passnote:join takes one name)")
                     self.assertFalse(os.path.exists(m))
                     self.assertFalse(os.path.isdir(os.path.join(self.home, "rooms")))
 

@@ -434,10 +434,11 @@ Plugin `userConfig` is not visible to Bash-tool commands, so the CLI does not us
   - the sandbox `allowWrite` entry for `PASSNOTE_HOME` (F19);
   - `notify_when_idle` for "tell me when X finishes", noting that the subscribe call still costs a turn (F28).
 
-**Skill** `skills/join/SKILL.md`, invoked by the human as `/passnote:join [name]` (#5).
+**Skill** `skills/join/SKILL.md`, invoked by the human as `/passnote:join [name]` (#5). Verified on Claude Code 2.1.295.
 - `disable-model-invocation: true`: it is not in the model's skill list, so it adds no always-on cost, and the model can't invoke it, so its arguments are only what the human typed.
-- Its ```` ```! ```` block runs `${CLAUDE_PLUGIN_ROOT}/bin/passnote join --name-stdin` before the model's turn, under an `allowed-tools` grant for exactly that command. Claude Code pastes the arguments into the block's text before a shell parses it, so the name goes through a quoted heredoc as `[<name>]`, never as `"$ARGUMENTS"`. The brackets show that the name arrived whole: a ```` ``` ```` in the arguments can close the block early. A multi-line argument holding the heredoc's terminator line could still run commands. Only the human can type one, so passnote doesn't defend against it further.
-- A refusal exits non-zero, so Claude Code shows the error and starts no model turn. With `disableSkillShellExecution` the block doesn't run, and the body tells the model to run `passnote join` itself.
+- Its ```` ```! ```` block runs `${CLAUDE_PLUGIN_ROOT}/bin/passnote join --name-stdin` before the model's turn, under an `allowed-tools` grant for exactly that command. Claude Code pastes the arguments into the block's text before a shell parses it, so the name goes through a quoted heredoc as `[<name>]`, never as `"$ARGUMENTS"`. The brackets show that the name arrived whole: a ```` ``` ```` in the arguments can close the block early. The single-line guarantee also relies on Claude Code escaping `!` and backticks in the arguments it pastes. A multi-line argument holding the heredoc's terminator line could still run commands. Only the human can type one, so passnote doesn't defend against it further.
+- `${CLAUDE_PLUGIN_ROOT}` is unquoted in the block, so that its command matches the `allowed-tools` rule. A plugin path with spaces therefore fails closed: the shell can't find the command, the block exits non-zero and nothing in the name runs.
+- A refusal exits non-zero, so Claude Code shows the error and starts no model turn. With `disableSkillShellExecution` the block doesn't run, and the body tells the model to run `passnote join` itself, adding `--as <name>` only for a valid name, so the raw argument never reaches its Bash command.
 
 ## 11. Operability (F27)
 
