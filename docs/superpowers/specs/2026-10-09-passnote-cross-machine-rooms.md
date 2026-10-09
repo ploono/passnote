@@ -1,7 +1,10 @@
 # passnote: rooms across machines
 
-**Status:** draft v0.2 (2026-10-09), for maintainer review. Part of #24. Not approved.
+**Status:** draft v0.3 (2026-10-09), for maintainer review. Part of #24. Not approved.
 - v0.2 follows maintainer feedback: a NATS server, not a GitHub issue, carries cross-laptop rooms. NATS JetStream is now the first backend. The GitHub issue backend is demoted to a fallback (§4.9).
+- v0.3 records two maintainer decisions (2026-10-09, on #24):
+  - `nats` is opt-in per room, with no machine-wide default (§4.10, Q12).
+  - Lines from other machines follow the same permission-class rules as local lines (§6.3, Q6).
 
 Builds on the Phase A design (`2026-09-26-passnote-design.md`, cited as "design §N") and its review (`2026-09-27-passnote-spec-review.md`, finding ids F1…F43). Waking idle members is the job of the listeners spec (`2026-10-09-passnote-listeners.md`). This spec depends on it for the follower in §4.5 and the "idle receivers" phase.
 
@@ -133,7 +136,7 @@ passnote keeps the cursor itself (`last_stream_seq`). Server-side durable consum
 
 **Each pulled record:**
 - skip it if its stream seq is at or below `last_stream_seq`, or its subject's machine token is this machine;
-- parse the payload. If it isn't a valid message or control record, or it is over the size limit, **skip it durably**: advance `last_stream_seq` past it and append a `remote-rejected` event (stream seq, author, reason; never the payload). A rejected record can never stall the records after it, and a test checks exactly that;
+- parse the payload. If it isn't a valid message or control record, is a message without a valid `mode` stamp (§6.3), or is over the size limit, **skip it durably**: advance `last_stream_seq` past it and append a `remote-rejected` event (stream seq, author, reason; never the payload). A rejected record can never stall the records after it, and a test checks exactly that;
 - dedupe by `(origin, id)` against the last 256 KB of the local log;
 - append it under the room lock with a fresh local seq, the fields of §4.3, and `verified` per §6.3;
 - save `last_stream_seq` after the append. A crash in between re-fetches the record, and the dedupe drops it.
@@ -213,7 +216,6 @@ Existing commands:
 | `PASSNOTE_REMOTES` | launch env | unset | Comma-separated allowlist of servers (`nats://nats.team.internal`) or single streams (`nats://nats.team.internal:4222/<room_key>`). Matching is on the **parsed** URL, never on a string prefix: same scheme; hostname equal, compared case-insensitively, with no subdomain or suffix matching; port equal, defaulting to 4222 on both sides; and if the entry has a path, the `room_key` equal. A test rejects lookalikes such as `nats://nats.team.internal.attacker/<room_key>`. Sync and attach refuse anything else |
 | `PASSNOTE_NATS_CERT`, `PASSNOTE_NATS_KEY`, `PASSNOTE_NATS_CA` | launch env | unset | mTLS client cert, key and CA bundle paths |
 | `PASSNOTE_NATS_USER`, `PASSNOTE_NATS_PASSWORD_FILE` | launch env | unset | user/password auth, as an alternative to mTLS |
-| `PASSNOTE_ALLOW_REMOTE_BYPASS` | launch env | unset | `1` lets verified remote lines reach a non-prompting receiver (§6.3) |
 
 ### 4.8 Hosting
 
@@ -269,10 +271,9 @@ This spec deviates in one detail: `post` also appends its own line to the local 
 - **A new reader set.** Text that today never leaves the laptop becomes readable by the server's operator and by every user with grants on the room's subjects (§6.1). On a loopback `nats-server` this is the same OS user, which changes nothing. On a shared server it is a real change of who can read the room.
 - **Going cross-machine later doesn't need it.** `remote attach` binds an existing `local` room in place: the cursors, ids and members stay. Lines from before the attach stay local unless `--backfill N` is given. So "no migration" doesn't require starting every room on NATS.
 
-**Recommendation (Q12):**
-- Keep `nats` opt-in per room in v1, with `join --backend nats` or `remote attach`.
-- Allow a machine-wide default only through the launch-env variable `PASSNOTE_DEFAULT_BACKEND=nats`, honoured only when the target is in `PASSNOTE_REMOTES`. A config file must not be able to point rooms at a server.
-- Revisit after Phase 3, once follower reliability and push-wake latency are measured.
+**Decided (maintainer, 2026-10-09; Q12):**
+- NATS is not the default backend. Every room is `local` unless it opts in to `nats` (`join --backend nats` or `remote attach`), and that includes rooms whose members are all on one machine.
+- There is no machine-wide default of any kind: no launch-env variable and no config key. Each room opts in by itself.
 
 ## 5. Wakes
 
@@ -307,6 +308,7 @@ The threat model widens. Locally, every room writer is a process of the same OS 
   - A match is not pushed. It stays local.
   - A `push-refused` event is appended, and the human sees a systemMessage.
 - The skill adds: no local paths in remote rooms (they don't resolve on the other machine, and they leak layout), and no file references for long payloads.
+- Full-text files (#27, `rooms/<room>/files/<id>.txt`) are not synced in v1. In a remote room, a post over `text_max_chars` is refused (exit 4). Otherwise other machines would get a clipped line with a `full_chars` count and no file. Syncing full texts, for example as an object store bucket, is a later question.
 
 ### 6.3 Verified senders and holds: fail closed
 
@@ -322,15 +324,16 @@ The threat model widens. Locally, every room writer is a process of the same OS 
   - A server that allows either marks the room unverifiable, and every pulled line in it is unverified.
   - `doctor` shows it with the permissions snippet as the fix.
 
-**Holds.** A pulled line's `mode` stamp is asserted by the origin machine. `trust.mode_class` treats a missing or unknown mode as non-prompting. Without a new rule, a forged or unstamped remote line would be **delivered to a bypass or auto receiver**. So:
+**Holds.** *Decided (maintainer, 2026-10-09; Q6):* a verified line from another machine follows **the same permission-class rules as a local line** (design §9). There is no remote-only hold and no remote-only opt-in variable. Sessions in auto or bypass mode can receive lines from other machines.
 
-| Pulled line | Prompting receiver | Non-prompting receiver |
+| Pulled line | Prompting receiver | Non-prompting receiver (auto, bypass, unknown) |
 |---|---|---|
-| verified, stamped prompting | deliver (class rule) | hold (class mismatch) |
-| verified, stamped non-prompting | hold (class mismatch) | hold, unless the receiver was launched with `PASSNOTE_ALLOW_REMOTE_BYPASS=1` |
-| unverified, or unstamped | hold | hold |
+| verified, stamped prompting | deliver | hold (class mismatch), unless the receiver was launched with `PASSNOTE_ALLOW_BYPASS=1`, as for local lines |
+| verified, stamped non-prompting | hold (class mismatch), unless the receiver was launched with `PASSNOTE_ALLOW_BYPASS=1`, as for local lines | deliver |
+| unverified (its sending machine can't be verified, or the room is unverifiable) | hold | hold. Nothing lifts this, `PASSNOTE_ALLOW_BYPASS=1` included |
 
-- `PASSNOTE_ALLOW_BYPASS=1` does **not** cover remote lines. It covers local members, which run as the same OS user. Remote writers are a wider set (Q6).
+- **The stamp is required on the wire.** A local post can carry `mode: "unknown"` (it ran in the same command as `join`), and delivery then falls back to the sender's recorded mode. A pulled line has no recorded mode to fall back to. So the pusher stamps the sender's recorded mode at push time. A line whose mode is still unknown waits in the outbox until a hook records it. On pull, a line without a valid mode stamp is rejected and skipped durably (§4.4). An unstamped remote line therefore never reaches the class rule.
+- **What this decision trusts.** A verified machine is trusted like a local member: its mode stamps are taken as given, just as a same-user local process's are today. Server permissions bind each line to its machine; they don't prove that machine's stamps. The README's threat model says so: joining a `nats` room extends the design §9 boundary ("every process of the same OS user") to every machine the server grants the room's subjects.
 - The displayed sender comes from the synced member records. A mismatch with `from` renders `(unverified)`, as today.
 - Escaping and the one-line rendering invariant (design §7, A4) apply unchanged. Pulled text is untrusted input like any other.
 - Holds keep text out of a model's context. They don't make the stream confidential: every reader of the stream sees held lines.
@@ -387,18 +390,13 @@ Each runs on macOS and Linux against the minimum Claude Code version and a pinne
 3. **Self-hosted or hosted NATS?** *Recommended:* document a self-hosted `nats-server -js` reachable over the team's private network or TLS, with one user per machine and the §6.3 permissions. Hosted services wait on Q4.
 4. **NKey and creds support (hosted services).** *Recommended:* not in v1. If it's wanted, add an optional `nats` CLI transport behind the backend interface. Don't vendor Ed25519 signing code into passnote.
 5. **Who holds the long-lived connection?** *Recommended:* only followers. That means an armed listener, or a `sync --follow` the human starts. Without one, the async hook runs short pulls. passnote ships no launchd or systemd unit; the README can show one as the user's own choice. This keeps ADR-0001's no-daemon decision.
-6. **Remote lines into non-prompting receivers.** *Recommended:* always hold, unless the receiver was launched with `PASSNOTE_ALLOW_REMOTE_BYPASS=1`, separate from `PASSNOTE_ALLOW_BYPASS`. Unverified or unstamped lines, and every line in an unverifiable room, are held from every receiver.
+6. **Remote lines into non-prompting receivers.** **Decided (maintainer, 2026-10-09):** auto and bypass sessions can receive lines from other machines. Verified remote lines follow the same permission-class rules as local lines: no remote-only hold and no `PASSNOTE_ALLOW_REMOTE_BYPASS`. Lines whose sending machine can't be verified are still held from every session (§6.3).
 7. **Names across machines.** *Recommended:* plain names, unique room-wide, first writer in stream order wins. `who` shows `@label`.
 8. **Retention.** *Recommended:* `max_age` of 7 days, plus `deny_delete` and `deny_purge`, so the stream is append-only and doesn't keep a team's working context forever.
 9. **Takeover across machines.** *Recommended:* not in v1.
 10. **`--allow-secret-looking` in remote rooms.** *Recommended:* rejected.
 11. **Threads (#25).** *Recommended:* the `thread` field travels like any other field. Subscriptions stay local. No backend change.
-12. **Should `nats` be the default for local-only rooms when NATS is configured?** *Recommended:* no, opt-in per room in v1 (§4.10).
-    - It adds a required sync process to rooms that need none.
-    - It widens who can read text that today never leaves the laptop.
-    - "Going cross-machine without migration" already works by attaching a local room in place.
-    - A machine-wide default is allowed only through the launch-env variable `PASSNOTE_DEFAULT_BACKEND=nats`.
-    - Revisit after Phase 3's follower data.
+12. **Should `nats` be the default for local-only rooms when NATS is configured?** **Decided (maintainer, 2026-10-09):** no. Rooms stay `local` unless a room opts in to `nats`, single-machine rooms included. There is no machine-wide default (§4.10).
 
 ## 11. Implementation outline
 
@@ -413,7 +411,7 @@ Each runs on macOS and Linux against the minimum Claude Code version and a pinne
 - A test-only `dir` backend stands in for the remote log, enabled only under the test suite.
 - *Acceptance:*
   - Two `PASSNOTE_HOME`s on one machine, joined through the `dir` backend, exchange an `ask` and an `ans` with hook delivery on both sides, and `re` resolves across them.
-  - Every row of the §6.3 table is a unit test, including the unverifiable-room case.
+  - Every row of the §6.3 table is a unit test, including the unverifiable-room case and `PASSNOTE_ALLOW_BYPASS=1` not lifting an unverified hold. A pulled message without a mode stamp is skipped and logged.
   - A local `join --as <remote member's name>` fails, and `gc` keeps remote members while attached.
   - A session in local rooms only does no extra file opens per delivery fire (a test counts them).
   - The rendering fuzz test (design §12) covers pulled lines.
@@ -440,9 +438,8 @@ Each runs on macOS and Linux against the minimum Claude Code version and a pinne
   - With a follower, a line posted on machine A is in machine B's local log within 1 s (p95 on a private network).
   - An idle, warm member on B with a listener armed is woken by an ask from A, with no SendMessage and no human action.
 
-**Phase 3b (if Q12 is decided for a default): `PASSNOTE_DEFAULT_BACKEND`.**
-- *Acceptance:*
-  - With it set and the target allowlisted, a new room is created as `nats`. Without the allowlist entry, the room is `local` and `doctor` says why.
+- *Acceptance, single-machine `nats` room* (§4.10):
+  - A room is `nats` only after its own opt-in; a new room is `local` whatever NATS config the machine has.
   - Stopping the follower shows the §4.10 lines in `doctor` and `who`.
   - Posts made while sync is down are delivered locally at once, and reach the stream in order when sync returns.
 
