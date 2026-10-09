@@ -394,7 +394,6 @@ class ValidMessageTest(HomeCase):
             ("mode", 123), ("mode", ["default"]),
             ("wake", None), ("wake", "yes"), ("wake", 1),
             ("ts", True), ("ts", "1234"),
-            ("full_chars", "5"), ("full_chars", True), ("full_chars", -1), ("full_chars", 1.5),
         ]
         for field, value in cases:
             with self.subTest(field=field, value="<absent>" if value is ABSENT else value):
@@ -409,6 +408,9 @@ class ValidMessageTest(HomeCase):
             ("wake", ABSENT), ("wake", True), ("wake", False),
             ("ts", ABSENT), ("ts", 1234), ("ts", 1234.5),
             ("full_chars", ABSENT), ("full_chars", None), ("full_chars", 5000),
+            # A forged full_chars never hides its line (fails open): render ignores a bad value.
+            ("full_chars", "5"), ("full_chars", True), ("full_chars", -1), ("full_chars", 1.5),
+            ("full_chars", [1]), ("full_chars", {"n": 1}),
         ]
         for field, value in cases:
             with self.subTest(field=field, value="<absent>" if value is ABSENT else value):

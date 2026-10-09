@@ -92,10 +92,8 @@ def valid_message(msg) -> bool:
     if "ts" in msg and msg.get("ts") is not None:
         if isinstance(msg.get("ts"), bool) or not isinstance(msg.get("ts"), (int, float)):
             return False
-    # full_chars: absent/None or int >= 0 (not bool)
-    full = msg.get("full_chars")
-    if full is not None and (isinstance(full, bool) or not isinstance(full, int) or full < 0):
-        return False
+    # full_chars is deliberately not checked: a forged value must fail open, never hide the line.
+    # render_line uses it only when it is an int (not bool) larger than the text, else ignores it.
     return True
 
 

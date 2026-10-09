@@ -147,6 +147,15 @@ class RenderLineTest(unittest.TestCase):
         for line in (too_small, no_room):
             self.assertIn("(+100 chars: passnote read --id a1)", line)
 
+    def test_every_forged_full_chars_shape_falls_back_to_read_id(self):
+        with mock.patch.dict(os.environ, {"PASSNOTE_HOME": "/nonexistent-home"}):
+            for forged in ("5000", True, False, -1, 0, 3, 1.5, 5000.0, float("nan"), float("inf"), [5000], {"n": 5000}):
+                with self.subTest(forged=forged):
+                    line = render.render_line(msg(text="z" * 700, full_chars=forged), "bob", MEMBERS, 600, room="r")
+                    self.assertTrue(line.endswith("z… (+100 chars: passnote read --id a1)"), line[-80:])
+            huge = render.render_line(msg(text="z" * 700, full_chars=10 ** 30), "bob", MEMBERS, 600, room="r")
+        self.assertIn(f"(+{10 ** 30 - 600} chars: full text in ", huge)
+
     def test_a_forged_room_or_bool_full_chars_falls_back(self):
         with mock.patch.dict(os.environ, {"PASSNOTE_HOME": "/nonexistent-home"}):
             bad_room = render.render_line(msg(text="z" * 700, full_chars=5000), "bob", MEMBERS, 600, room="../x")

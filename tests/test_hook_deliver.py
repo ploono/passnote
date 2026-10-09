@@ -603,6 +603,18 @@ class FullTextDeliverTest(DeliverCase):
         ctx = self.context(self.deliver(self.b))
         self.assertIn("q" * 1500 + f"… (+4500 chars: full text in {store.full_text_path('r', 'a1')})", ctx)
 
+    def test_every_forged_full_chars_shape_is_still_delivered(self):
+        forged = ("5000", True, -1, 1.5, [5000], {"n": 5000}, 0)
+        for value in forged:
+            post(self.a, "r", "f" * 700, full_chars=value)
+        seen, contexts = self.drain(self.b)
+        ids = [f"a{i}" for i in range(1, len(forged) + 1)]
+        self.assertEqual(seen, set(ids))
+        text = "\n".join(contexts)
+        for msg_id in ids:
+            self.assertIn("f" * 600 + f"… (+100 chars: passnote read --id {msg_id})", text)
+        self.assertNotIn("full text in", text)
+
     def test_forged_full_chars_keep_the_output_under_8kb(self):
         for i in range(60):
             post(self.a, "r", "漢" * 4000, full_chars=10 ** 12, to=["bob"], kind="ask")
