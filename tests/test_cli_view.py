@@ -147,6 +147,16 @@ class WhoTest(CliCase):
         self.run_cli(self.b, "unsubscribe", "auth")
         self.assertRegex(self.run_cli(self.b, "who")[1], r"bob \(b\) · [^\n]* · threads none · you\n")
 
+    def test_who_shows_digest(self):
+        self.run_cli(self.b, "subscribe", "auth")
+        self.run_cli(self.b, "digest", "on")
+        out = self.run_cli(self.a, "who")[1]
+        self.assertRegex(out, r"bob \(b\) · [^\n]* · threads auth · digest\n")
+        self.assertNotIn("digest", [line for line in out.split("\n") if line.startswith("  alice")][0])
+        self.assertRegex(self.run_cli(self.b, "who")[1], r"bob \(b\) · [^\n]* · digest · you\n")
+        self.run_cli(self.b, "digest", "off")
+        self.assertNotIn("digest", self.run_cli(self.a, "who")[1])
+
 
 class WatchTest(CliCase):
     def setUp(self):

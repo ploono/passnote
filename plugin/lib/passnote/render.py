@@ -34,6 +34,14 @@ MAX_ROOMS_SHOWN = 3
 MAX_NAMES_PER_ROOM = 3
 # The seen-receipt line (#28): at most this many characters, all ASCII, so its JSON size is its length.
 RECEIPT_MAX_CHARS = 300
+# Digest mode (#26): one line per (room, thread) with new activity, at most DIGEST_MAX_LINES per fire,
+# each ending in a gist of the newest message's text.
+DIGEST_GIST_CHARS = 60
+DIGEST_MAX_LINES = 8
+# Kinds that still arrive whole in digest mode when addressed to me by name.
+WHOLE_KINDS = ("ask", "err", "prop", "nak", "ans")
+# The seq part of a message id (alias + seq): a reply's `re` is one of my posts when it is my alias + this.
+_SEQ_DIGITS = re.compile(r"[0-9]+")
 # audience(): how many `to` names to list before folding the rest into "+N" (fix round 3 --
 # an unbounded list of forged names could otherwise blow a single line up on its own).
 MAX_TO_NAMES_SHOWN = 3
@@ -124,6 +132,41 @@ def thread_of(msg):
     counts as unthreaded, so it is delivered to every member and rendered without a #thread."""
     thread = msg.get("thread")
     return thread if paths.valid_member_name(thread) else None
+
+
+def replies_to(msg, alias) -> bool:
+    """Whether msg's `re` is one of the posts of the member with this alias (ids are alias + seq).
+    No pattern is built from member data; a forged `re` only makes more lines arrive."""
+    parent = msg.get("re")
+    return (isinstance(alias, str) and bool(alias) and isinstance(parent, str) and parent.startswith(alias)
+            and bool(_SEQ_DIGITS.fullmatch(parent[len(alias):])))
+
+
+def whole(msg, me, alias=None) -> bool:
+    """In digest mode (#26), whether msg still arrives as its own line: every prop (silence counts as
+    consent once the cursor passes it); every reply to one of my posts (`alias` is mine); an ask, err,
+    prop, nak or ans addressed to me by name; and anything posted with --wake."""
+    if msg.get("kind") == "prop" or msg.get("wake") is True or replies_to(msg, alias):
+        return True
+    return addressed_by_name(msg, me) and msg.get("kind") in WHOLE_KINDS
+
+
+def digest_line(group, multi) -> str:
+    """'#<thread>: <n> new (<first id>..<last id>), last <sender>: <gist>' for one (room, thread)
+    group of items in seq order; 'unthreaded' for lines without a thread. One line, bounded: every
+    head field is clipped and escaped, and the gist is DIGEST_GIST_CHARS at most."""
+    first, last = group[0], group[-1]
+    thread = thread_of(first["msg"])
+    label = f"#{thread}" if thread else "unthreaded"  # a valid name needs no escaping
+    first_id = escape_text(_clip_field(first["msg"].get("id", "?")))
+    span = first_id
+    if len(group) > 1:
+        span = f"{first_id}..{escape_text(_clip_field(last['msg'].get('id', '?')))}"
+    line = (f"{label}: {len(group)} new ({span}), last {_resolved_name(last['msg'], last['members'])}: "
+            f"{gist(last['msg'].get('text', ''), DIGEST_GIST_CHARS)}")
+    if multi:
+        line = f"[{escape_text(_clip_field(first.get('display') or first['room']))}] {line}"
+    return line
 
 
 def render_line(msg, me, members, clip, room=None) -> str:
@@ -226,12 +269,26 @@ def build(items, me, budget, clip, tail=None):
     room) overrides `me`. Each emitted entry is a copy of its item plus "line", the exact line the
     context holds for it, so the hook can confirm that line, not a bare id, in the transcript.
     `tail` (a receipt line, passnote's own text) ends the context, counted in the budget and in
-    MAX_CONTEXT_JSON; with no items it is the whole context, with no header."""
+    MAX_CONTEXT_JSON; with no items it is the whole context, with no header.
+
+    Items marked "digest" (#26) are grouped by (room, thread) and each group renders as one
+    digest_line after the whole items: groups with a redelivered item first, then by earliest seq,
+    at most DIGEST_MAX_LINES; a group that doesn't fit overflows with all its items. Every item of
+    an emitted group records that one line, so the transcript confirms the group from it."""
     if not items:
         return (tail or None), [], []
     ordered = sorted(items, key=lambda it: (0 if it.get("redeliver") else 1,
                                             priority(it["msg"], it.get("me", me)),
                                             it["msg"].get("seq", 0)))
+    groups = {}
+    for it in ordered:
+        if it.get("digest"):
+            groups.setdefault((it["room"], thread_of(it["msg"])), []).append(it)
+    ordered = [it for it in ordered if not it.get("digest")]
+    for group in groups.values():
+        group.sort(key=lambda it: it["msg"].get("seq", 0))
+    groups = sorted(groups.values(), key=lambda group: (0 if any(it.get("redeliver") for it in group) else 1,
+                                                        group[0]["msg"].get("seq", 0)))
     multi = len({it["room"] for it in items}) > 1
     # Reserve room for the overflow line before packing (fix round 3): packing greedily to
     # MAX_CONTEXT_JSON left no slack for even the zero-id overflow line, so it was silently
@@ -286,6 +343,22 @@ def build(items, me, budget, clip, tail=None):
             size += cost
         else:
             overflow.append(it)
+    digests = 0
+    for group in groups:
+        line = digest_line(group, multi)
+        cost = _json_len("\n" + line)
+        # The first line of a fire ignores the character budget, as a whole first line does, so a
+        # fire always makes progress; it still leaves OVERFLOW_ID_SLACK when other items wait.
+        cap = pack_cap - (OVERFLOW_ID_SLACK if not emitted and len(items) > len(group) else 0)
+        if (digests >= DIGEST_MAX_LINES or (emitted and used + 1 + len(line) > budget)
+                or size + cost > cap):
+            overflow.extend(group)
+            continue
+        lines.append(line)
+        emitted.extend(dict(it, line=line) for it in group)
+        used += 1 + len(line)
+        size += cost
+        digests += 1
     if overflow:
         def overflow_line(n_ids):
             if n_ids <= 0:

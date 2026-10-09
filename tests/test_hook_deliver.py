@@ -28,6 +28,14 @@ class DeliverCase(HomeCase):
         return (out or {}).get("hookSpecificOutput", {}).get("additionalContext", "")
 
     @staticmethod
+    def confirm(path, out):
+        """Record `out`'s context in the transcript, as Claude Code does when it reaches the model."""
+        record = {"type": "attachment", "attachment": {"type": "hook_additional_context",
+                                                       "content": [DeliverCase.context(out)]}}
+        with open(path, "a") as fh:
+            fh.write(json.dumps(record) + "\n")
+
+    @staticmethod
     def ids_in(ctx):
         return {line.split(" ", 1)[0] for line in ctx.split("\n")[1:] if line and not line.startswith("…")}
 
@@ -136,14 +144,6 @@ class DeliverTest(DeliverCase):
         with open(path, "a") as fh:
             fh.write(json.dumps(record) + "\n")
         self.assertIsNone(self.deliver(self.b, transcript_path=path))
-
-    @staticmethod
-    def confirm(path, out):
-        """Record `out`'s context in the transcript, as Claude Code does when it reaches the model."""
-        record = {"type": "attachment", "attachment": {"type": "hook_additional_context",
-                                                       "content": [DeliverTest.context(out)]}}
-        with open(path, "a") as fh:
-            fh.write(json.dumps(record) + "\n")
 
     def test_a_delivered_id_from_another_room_does_not_confirm_a_dropped_one(self):
         join(self.a, "s", "alice")
@@ -1151,6 +1151,113 @@ class ThreadDeliverTest(DeliverCase):
         self.assertEqual([ev["id"] for ev in sessions.load_emit(self.b)["delivered"]], ["a4"])
         line = [ln for ln in self.context(self.deliver(self.a)).split("\n") if ln.startswith("passnote: seen")]
         self.assertEqual(line, ["passnote: seen by bob: a4"])
+
+
+class DigestDeliverTest(DeliverCase):
+    def setUp(self):
+        super().setUp()
+        rooms.set_prefs(self.b, "r", digest=True)
+
+    def test_a_turn_costs_one_line_per_active_thread_and_asks_arrive_whole(self):
+        post(self.a, "r", "s1", thread="auth")
+        post(self.a, "r", "report", thread="auth", kind="done", to=["bob"])
+        post(self.a, "r", "s2", thread="db")
+        post(self.a, "r", "need you", thread="auth", kind="ask", to=["bob"])
+        lines = self.context(self.deliver(self.b)).split("\n")[1:]
+        self.assertEqual(lines, ["a4 alice→you ask #auth: need you",
+                                 "#auth: 2 new (a1..a2), last alice: report",
+                                 "#db: 1 new (a3), last alice: s2"])
+
+    def test_addressed_prop_arrives_whole_in_digest_mode(self):
+        post(self.a, "r", "ship at 3", kind="prop", to=["bob"])
+        self.assertIn("a1 alice→you prop: ship at 3", self.context(self.deliver(self.b)))
+
+    def test_a_broadcast_prop_arrives_whole_in_digest_mode(self):
+        post(self.a, "r", "ship db at 3", thread="db", kind="prop")
+        post(self.a, "r", "chatter", thread="db")
+        self.assertEqual(self.context(self.deliver(self.b)).split("\n")[1:],
+                         ["a1 alice→all prop #db: ship db at 3", "#db: 1 new (a2), last alice: chatter"])
+
+    def test_an_answer_to_the_hub_arrives_whole(self):
+        post(self.a, "r", "yes, merged", kind="ans", to=["bob"])
+        self.assertIn("a1 alice→you ans: yes, merged", self.context(self.deliver(self.b)))
+
+    def test_a_broadcast_nak_to_the_hubs_prop_arrives_whole(self):
+        post(self.b, "r", "ship at 3", kind="prop")
+        self.deliver(self.b)  # bob's cursor passes his own prop
+        post(self.a, "r", "not yet", kind="nak", re="b1")
+        post(self.a, "r", "an ans to someone else", kind="ans", re="a9")
+        self.assertEqual(self.context(self.deliver(self.b)).split("\n")[1:],
+                         ["a2 alice→all nak re=b1: not yet", "unthreaded: 1 new (a3), last alice: an ans to someone else"])
+
+    def test_a_digested_line_is_never_delivery_evidence(self):
+        post(self.a, "r", "report", kind="done", to=["bob"])
+        post(self.a, "r", "open question", kind="ask")
+        post(self.a, "r", "need you", kind="ask", to=["bob"])
+        self.deliver(self.b)
+        self.assertEqual([ev["id"] for ev in sessions.load_emit(self.b)["delivered"]], ["a3"])
+
+    def test_delivered_skips_a_digested_item(self):
+        """Even an addressed ask, were it ever digested, is no evidence: its text never reached the model."""
+        m = {"id": "a1", "seq": 1, "kind": "ask", "to": ["bob"]}
+        emitted = [{"room": "r", "msg": m, "me": "bob", "digest": True}]
+        self.assertEqual(hook._delivered([], emitted, time.time()), [])
+        self.assertEqual(len(hook._delivered([], [dict(emitted[0], digest=False)], time.time())), 1)
+
+    def test_digest_line_is_confirmed_from_the_transcript(self):
+        path = os.path.join(self.tmp, "t.jsonl")
+        open(path, "w").close()
+        post(self.a, "r", "s1", thread="auth")
+        post(self.a, "r", "s2", thread="auth")
+        out = self.deliver(self.b, transcript_path=path)
+        self.assertEqual(self.context(out).split("\n")[1:], ["#auth: 2 new (a1..a2), last alice: s2"])
+        self.confirm(path, out)
+        self.assertIsNone(self.deliver(self.b, transcript_path=path))
+
+    def test_an_unconfirmed_digest_comes_back_once_as_a_digest(self):
+        path = os.path.join(self.tmp, "t.jsonl")
+        open(path, "w").close()
+        post(self.a, "r", "s1", thread="auth")
+        self.deliver(self.b, transcript_path=path)             # never confirmed
+        again = self.context(self.deliver(self.b, transcript_path=path))
+        self.assertEqual(again.split("\n")[1:], ["#auth: 1 new (a1), last alice: s1"])
+        self.assertIsNone(self.deliver(self.b, transcript_path=path))
+
+    def test_overflowing_groups_come_next_fire_as_digest_lines(self):
+        for i in range(render.DIGEST_MAX_LINES + 2):
+            post(self.a, "r", f"n{i}", thread=f"t{i}")
+        first = self.context(self.deliver(self.b)).split("\n")[1:]
+        self.assertEqual(len(first), render.DIGEST_MAX_LINES + 1)
+        self.assertIn("not shown yet", first[-1])
+        second = self.context(self.deliver(self.b)).split("\n")[1:]
+        self.assertEqual(second, ["#t8: 1 new (a9), last alice: n8", "#t9: 1 new (a10), last alice: n9"])
+
+    def test_digest_off_delivers_every_line(self):
+        rooms.set_prefs(self.b, "r", digest=None)
+        post(self.a, "r", "s1", thread="auth")
+        self.assertIn("a1 alice→all say #auth: s1", self.context(self.deliver(self.b)))
+
+    def test_forged_digest_value_means_off(self):
+        rooms.set_prefs(self.b, "r", digest=None)
+        for forged in ("yes", 1, [True], {"on": True}):
+            with self.subTest(forged=forged):
+                with store.room_lock("r"):
+                    members = store.load_members("r")
+                    members[self.b]["digest"] = forged
+                    store.save_members("r", members)
+                post(self.a, "r", "s1", thread="auth")
+                self.assertIn("alice→all say #auth: s1", self.context(self.deliver(self.b)))
+
+    def test_the_thread_filter_runs_before_digest(self):
+        rooms.set_prefs(self.b, "r", threads=["auth"])
+        post(self.a, "r", "s1", thread="auth")
+        post(self.a, "r", "skipped", thread="db")
+        self.assertEqual(self.context(self.deliver(self.b)).split("\n")[1:], ["#auth: 1 new (a1), last alice: s1"])
+
+    def test_a_held_message_is_not_counted_in_a_digest(self):
+        sessions.update_meta(self.a, lambda meta: meta.update(permission_mode="bypassPermissions"))
+        post(self.a, "r", "s1", thread="auth", mode="bypassPermissions")
+        self.assertNotIn("#auth", self.context(self.deliver(self.b)))
 
 
 if __name__ == "__main__":

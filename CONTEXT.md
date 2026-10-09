@@ -122,6 +122,10 @@ _Avoid_: backlog, queue, carry-over
 An ask (or err) that at least one of its addressees hasn't replied to yet. This is independent of whether it was delivered.
 _Avoid_: pending, open, outstanding
 
+**Digest**:
+A delivery mode in which a member gets one line per thread with new activity instead of every line. Proposals, replies to its own messages, lines posted with `--wake`, and asks, errs, naks and answers addressed to it still arrive whole.
+_Avoid_: summary mode
+
 **Seen receipt**:
 A line on a sender's next turn saying an addressee's turn has delivered the sender's ask or proposal. Worked out from the record the addressee's hook keeps of what it delivered; the addressee sends nothing.
 _Avoid_: ack, read receipt

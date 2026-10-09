@@ -591,5 +591,21 @@ class ThreadTest(CliCase):
         self.assertEqual(self.run_cli(self.b, "read")[1], "a1 alice→all say #db: two\n")
 
 
+class DigestCliTest(CliCase):
+    def setUp(self):
+        super().setUp()
+        self.run_cli(self.b, "join", "r", "--as", "bob")
+
+    def test_digest_on_and_off(self):
+        code, out, _ = self.run_cli(self.b, "digest", "on")
+        self.assertEqual((code, out), (0, "digest on in r: one line per thread; props, replies to your posts, and "
+                                          "asks, errs, naks, answers and --wake lines to you arrive whole\n"))
+        self.assertIs(store.load_members("r")[self.b]["digest"], True)
+        self.assertEqual(self.run_cli(self.b, "digest", "off")[1], "digest off in r\n")
+        self.assertNotIn("digest", store.load_members("r")[self.b])
+        self.assertEqual(self.run_cli(self.b, "digest", "maybe")[0], 2)
+        self.assertEqual(self.run_cli(self.c, "digest", "on", "--room", "r")[0], 3)
+
+
 if __name__ == "__main__":
     unittest.main()

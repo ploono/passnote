@@ -216,6 +216,13 @@ class RoomsTest(HomeCase):
         rooms.join(new, "r", "bob", "/root")  # join rebuilds the entry: it must keep the setting
         self.assertEqual(store.load_members("r")[new]["threads"], ["auth"])
 
+    def test_digest_survives_clear(self):
+        rooms.join(self.b, "r", "bob", "/root")
+        rooms.set_prefs(self.b, "r", digest=True)
+        new = new_sid()
+        rooms.carry_over(self.b, new)
+        self.assertIs(store.load_members("r")[new]["digest"], True)
+
     def test_carry_over_creates_the_new_session_dir_before_moving_membership(self):
         rooms.join(self.a, "r", "alice", "/root")
         new = new_sid()

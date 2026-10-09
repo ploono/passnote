@@ -10,6 +10,7 @@ Amended by .scratch/passnote-phase-a/issues/01 (takeover only when gone; gc keep
   - #27 (§4, §6, §7 step 6, §8, §10): a post over `text_max_chars` keeps its first 4,000 characters in the log and its whole text in a full-text file, `rooms/<room>/files/<id>.txt`; delivery shows the file's path. Posts over `full_text_max_chars` (100,000) are refused.
   - #28 (§6, §7): seen receipts. A sender's next turn shows `passnote: seen by <name>: <id>` once an addressee's turn has delivered its addressed `ask` or `prop`. The sender's own hook works this out from the delivery evidence the addressee's hook keeps; no message is sent.
   - #25 (§4, §6, §7 step 5, §10): threads. A message may carry `thread` (`post --thread <name>`; a reply inherits its ask's thread). A member with a subscription (`subscribe`/`unsubscribe`, stored as `threads` on its `members.json` entry) is delivered only its threads, plus unthreaded lines, props, replies to its own posts and lines addressed to it by name.
+  - #26 (§7, §10): digest mode. A member with `digest: true` on its `members.json` entry (`passnote digest on|off`) gets one line per (room, thread) with new activity instead of every line; props, replies to its own posts, lines posted with `--wake`, and `ask`, `err`, `prop`, `nak` and `ans` addressed to it by name still arrive whole.
 
 Approved by the author on 2026-09-27.
 
@@ -290,6 +291,14 @@ Escaping is **a security control, not cosmetics** (A4). A raw newline let a forg
 - It is not added to the systemMessage, so the 8 KB arithmetic (6,500 + 1,000) is unchanged; the human sees "seen" in `passnote who`. A receipt is never recorded for transcript confirmation: a lost one is not redelivered, so each is shown at most once.
 - Known gap: asks posted before a `/clear` carry the old session id, so the new session doesn't track them. Pending receipts already recorded are carried over.
 
+**Digest delivery (#26).** A hub member that would otherwise read every report in full can turn on digest mode: `passnote digest on` sets `digest: true` on its `members.json` entry (read this fire anyway, so no extra I/O; kept across `/clear`). Only the JSON value `true` turns it on: a forged value means off, which delivers more.
+- **Whole lines.** These still render as their own line: every `prop` (silence counts as consent once the cursor passes it, so a digested prop would be consent never given); every reply to one of the member's own posts (`re` is its alias followed by digits, the same check as the thread filter); anything posted with `--wake`; and an `ask`, `err`, `prop`, `nak` or `ans` addressed to it by name.
+- **Digested.** Everything else that step 5 lets through: broadcast `say`, `done`, `claim`, `ask`, and `ans`/`nak` to others; addressed `say`, `done` and `claim`. The thread filter runs first, so a skipped thread is never counted, and a held message is never counted in a digest.
+- **Format.** One line per (room, thread) with new activity, after the whole lines: `#<thread>: <n> new (<first id>..<last id>), last <sender>: <gist>`, or `unthreaded: …` for lines without a thread; one message shows `(<id>)`. The gist is the newest message's text, at most 60 rendered characters. The `[room]` prefix applies as for other lines. Groups with a redelivered item come first, then by earliest seq.
+- **Bounds.** At most 8 digest lines per fire; the items of further groups overflow, named on the overflow line, and come next fire. Digest lines count inside the character budget and the 6,500-byte cap. The first line of a fire, whole or digest, is always emitted, so a fire always makes progress.
+- **Confirmation.** Every digested item's emitted ref records the digest line as its `line`, so one transcript line confirms the whole group. An unconfirmed group comes back once, marked redelivered, as a digest line again, never as whole messages. A digested message is never delivery evidence for a seen receipt (its text didn't reach the model); addressed asks and props always arrive whole anyway.
+- **Detail on demand.** `passnote read --thread <name> --last <n>` or `read --id <id>`.
+
 **Errors.**
 - The hook always exits 0 and logs errors to `errors.log`.
 - The first failure in a session also emits one systemMessage.
@@ -388,7 +397,8 @@ All commands take `--room`. The room is resolved as follows: the explicit `--roo
 | `read [--id x \| --since id \| --last N] [--thread name]` | Filtered read that never moves the cursor. `--since` is exclusive. `--thread` filters first, and shows lines a subscription skipped |
 | `subscribe [thread ...] [--all]` | Receive only these threads (plus unthreaded lines, props, replies to your posts and addressed lines); `--all` removes the filter; no arguments prints the setting (#25) |
 | `unsubscribe thread ...` | Drop threads from the subscription; refused when there is none (#25) |
-| `who` | Members, warm or cold, name and permission mode, thread subscription, last error, pending addressed messages, claims, whether props were seen |
+| `digest on\|off` | Digest mode: one line per thread with new activity; props, replies to your posts, `--wake` lines and asks, errs, props, naks and answers addressed to you still arrive whole (#26) |
+| `who` | Members, warm or cold, name and permission mode, thread subscription, digest mode, last error, pending addressed messages, claims, whether props were seen |
 | `watch [room \| --all]` | Live colored view of messages, holds, wake decisions and pending items |
 | `doctor` | Checks (§11) |
 | `gc` | Prune dead cursors, stale members and orphaned session dirs. Also runs opportunistically on `join` |

@@ -27,8 +27,6 @@ RECEIPT_MAX_AGE = 86400  # seconds
 RECEIPTS_PER_FIRE = 6
 # Delivery evidence a session keeps: the addressed asks and props it delivered to its model.
 MAX_DELIVERED = 64
-# The seq part of a message id (alias + seq): a reply's `re` is one of my posts when it is my alias + this.
-_SEQ_DIGITS = re.compile(r"[0-9]+")
 
 
 def main(event, stdin_text, env=None) -> str:
@@ -254,15 +252,22 @@ class _Fire:
         read. A forged `re` only delivers more."""
         if msg.get("kind") == "prop" or render.addressed_by_name(msg, me):
             return True
-        alias = self.room(room)[0].get(self.sid, {}).get("alias")
-        parent = msg.get("re")
-        return (isinstance(alias, str) and bool(alias) and isinstance(parent, str) and parent.startswith(alias)
-                and bool(_SEQ_DIGITS.fullmatch(parent[len(alias):])))
+        return render.replies_to(msg, self.alias(room))
+
+    def alias(self, room):
+        """My alias in a room, from the members.json this fire already read (None if not listed)."""
+        info = self.room(room)[0].get(self.sid)
+        return info.get("alias") if isinstance(info, dict) else None
 
     def deliver(self, room, msg, ref, redeliver=False):
+        """Queue msg for rendering. In digest mode (#26) it is marked to fold into its thread's digest
+        line unless render.whole says it arrives whole. This runs for redelivered and carried items
+        too, so the mark always follows the current setting."""
         members, display, _, me = self.room(room)
+        _, digest_on = self.prefs(room)
         self.items.append({"room": room, "display": display, "msg": msg, "members": members, "me": me,
-                           "ref": ref, "redeliver": redeliver})
+                           "ref": ref, "redeliver": redeliver,
+                           "digest": digest_on and not render.whole(msg, me, self.alias(room))})
         self.seen.add((room, msg["id"], msg["seq"]))
         self.taken[room] = self.taken.get(room, 0) + 1
 
@@ -304,16 +309,18 @@ def _valid_evidence(entry) -> bool:
 
 def _delivered(previous, emitted, now):
     """This session's delivery evidence after a fire: the addressed (by name) asks and props it
-    emitted to its model, as {room, id, seq, ts}. Only emitted lines count, never held or
-    overflowing ones, so a sender's receipt can't report a held message seen. Bounded: the last
-    MAX_DELIVERED, none older than RECEIPT_MAX_AGE; malformed entries are dropped."""
+    emitted to its model, as {room, id, seq, ts}. Only lines emitted whole count, never held,
+    overflowing or digested ones (a digest line doesn't show the text), so a sender's receipt can't
+    report a held message seen. Bounded: the last MAX_DELIVERED, none older than RECEIPT_MAX_AGE;
+    malformed entries are dropped."""
     out = [entry for entry in previous[-MAX_DELIVERED:]
            if _valid_evidence(entry) and now - entry["ts"] <= RECEIPT_MAX_AGE]
     keys = {(entry["room"], entry["id"], entry["seq"]) for entry in out}
     for it in emitted:
         msg = it["msg"]
         key = (it["room"], msg["id"], msg["seq"])
-        if msg.get("kind") in RECEIPT_KINDS and render.addressed_by_name(msg, it.get("me")) and key not in keys:
+        if (msg.get("kind") in RECEIPT_KINDS and render.addressed_by_name(msg, it.get("me")) and not it.get("digest")
+                and key not in keys):
             keys.add(key)
             out.append({"room": it["room"], "id": msg["id"], "seq": msg["seq"], "ts": now})
     return out[-MAX_DELIVERED:]

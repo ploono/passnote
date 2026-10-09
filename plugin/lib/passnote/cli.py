@@ -77,6 +77,11 @@ def build_parser():
     p.add_argument("--room")
     p.set_defaults(func=cmd_unsubscribe, needs_home=True)
 
+    p = sub.add_parser("digest", help="one line per thread instead of every line")
+    p.add_argument("state", choices=("on", "off"))
+    p.add_argument("--room")
+    p.set_defaults(func=cmd_digest, needs_home=True)
+
     # `who` and `watch` only read, and uninstall doesn't need the storage root: they don't create it
     # (`who` in a fresh home leaves it absent) but still refuse one others can write to ("check").
     # shim doesn't touch it at all.
@@ -358,6 +363,20 @@ def cmd_subscribe(args, stdin, stdout, env):
     return 0
 
 
+def cmd_digest(args, stdin, stdout, env):
+    sid, meta = _session(env)
+    room = _room(args, meta)
+    _members_or_exit(sid, room)
+    on = args.state == "on"
+    rooms.set_prefs(sid, room, digest=on or None)
+    if on:
+        stdout.write(f"digest on in {room}: one line per thread; props, replies to your posts, and asks, errs, "
+                     "naks, answers and --wake lines to you arrive whole\n")
+    else:
+        stdout.write(f"digest off in {room}\n")
+    return 0
+
+
 def cmd_unsubscribe(args, stdin, stdout, env):
     sid, room, threads = _my_threads(args, env)
     if threads is None:
@@ -554,9 +573,11 @@ def cmd_who(args, stdin, stdout, env):
         mode = smeta.get("permission_mode")
         line = (f"  {render.escape_text(info['name'])} ({render.escape_text(info['alias'])}) · "
                 f"{_session_state(member, now)} · mode {render.gist(mode, 40) if mode else 'unknown'}")
-        threads, _ = store.member_prefs(info)
+        threads, digest = store.member_prefs(info)
         if threads is not None:
             line += " · threads " + (", ".join(sorted(threads)) or "none")
+        if digest:
+            line += " · digest"
         if member == sid:
             line += " · you"
         last_error = smeta.get("last_error")

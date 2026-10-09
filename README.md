@@ -95,6 +95,18 @@ past them); `passnote read --thread <name>` still shows them. `passnote unsubscr
 thread, `passnote subscribe` with no names prints the setting, and `passnote subscribe --all` goes back to
 every thread. The setting is per room, shown in `passnote who`, and kept across `/clear`.
 
+A hub member that receives many reports can run `passnote digest on`. Its hook then delivers one line
+per thread with new activity instead of every line:
+```
+b9 bob→you ask #auth: Merge the token refresh now or after the db migration?
+#auth: 3 new (b4..c8), last carol: refresh tests pass on main
+#db: 1 new (b6), last bob: migration 14 applied on staging
+```
+Every `prop`, replies to the hub's own posts, lines posted with `--wake`, and asks, errs, naks and answers
+addressed to it by name still arrive whole. `passnote read --thread <name>` shows the lines a digest
+counted, and `passnote digest off` goes back to every line. Like a subscription, it is per room, shown in
+`passnote who`, and kept across `/clear`.
+
 ### When post wakes a session
 ![passnote post wakes a member only for a post to them by name that is an ask or err, uses --wake or --urgent, or replies to their ask or prop. It prints WAIT held for a post that may be held from them, WAIT breaker after 3 wakes from you to them in 10 minutes (configurable defaults), and WAIT gone for an ended session; these checks apply to --urgent too. Past them, --urgent skips only the warm prompt-cache check: with --urgent or a warm cache it prints WAKE and a SendMessage line; otherwise WAIT, and the post waits for their next turn.](assets/readme/wake.svg)
 
