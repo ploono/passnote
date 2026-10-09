@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -29,7 +30,10 @@ def build_parser():
     # not match the subagent write guard's `passnote <verb>` pattern (hook._WRITE_CMD).
     p = sub.add_parser("join", help="join a room (default: this project's room)")
     p.add_argument("room", nargs="?")
-    p.add_argument("--as", dest="as_name", metavar="NAME")
+    named = p.add_mutually_exclusive_group()
+    named.add_argument("--as", dest="as_name", metavar="NAME")
+    named.add_argument("--name-stdin", action="store_true",
+                       help="read the name from stdin as one line, [<name>] ([] for none): /passnote:join's form")
     p.set_defaults(func=cmd_join, needs_home=True)
 
     p = sub.add_parser("leave", help="leave a room")
@@ -238,7 +242,23 @@ def _valid_messages(room):
     return [msg for _, msg in store.iter_messages(room) if store.valid_message(msg)]
 
 
+# /passnote:join's ```! block pastes the typed name between brackets into a quoted heredoc. Both
+# brackets and one line prove the name arrived whole: a ``` in it can close the block early.
+_NAME_FRAME = re.compile(r"\[([^\r\n]*)\]\n?")
+
+
+def _name_from_stdin(stdin):
+    """The name framed on stdin as `[<name>]`, or None for `[]` (spaces and tabs around it trimmed)."""
+    frame = _NAME_FRAME.fullmatch(stdin.read())
+    if not frame:
+        raise paths.PassnoteError("/passnote:join takes one name on one line and this one was cut short or "
+                                  "spans lines: use 1-64 of A-Z a-z 0-9 . _ -", 2)
+    return frame.group(1).strip(" \t") or None
+
+
 def cmd_join(args, stdin, stdout, env):
+    if args.name_stdin:
+        args.as_name = _name_from_stdin(stdin)
     sid, meta = _session(env)
     if args.room:
         room = paths.check_name(args.room, member=False)
@@ -250,6 +270,9 @@ def cmd_join(args, stdin, stdout, env):
         name, source = meta["name"], meta.get("name_source")  # one name per session
     else:
         name, source = sessions.resolve_name(args.as_name, pid, meta.get("title"))
+    if not name and args.name_stdin:
+        raise paths.PassnoteError("no session name found: run /passnote:join <name>, or name the session with "
+                                  "/rename <name> and run /passnote:join again", 2)
     if not name:
         raise paths.PassnoteError("no session name found: pass --as <name> (use your ListAgents name)", 2)
     other_rooms = [other for other in meta["rooms"] if other != room]

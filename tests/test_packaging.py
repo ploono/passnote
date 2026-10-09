@@ -127,6 +127,92 @@ class ManifestTest(unittest.TestCase):
             self.assertEqual(modes.get(path), "100755", path)
 
 
+
+JOIN_SKILL = os.path.join(PLUGIN, "skills", "join", "SKILL.md")
+# The ```! block of /passnote:join, line for line. Claude Code pastes the typed arguments into its
+# text before a shell parses it, so "$ARGUMENTS" would run a typed $(...); a quoted heredoc doesn't
+# expand them, and the brackets let the CLI see when a ``` in them closed the block early (#5).
+JOIN_BLOCK = (
+    "```!",
+    "${CLAUDE_PLUGIN_ROOT}/bin/passnote join --name-stdin <<'PASSNOTE_JOIN_NAME_END'",
+    "[$ARGUMENTS]",
+    "PASSNOTE_JOIN_NAME_END",
+    "```",
+)
+# Claude Code runs the block with the user's shell: every one of these must treat it the same.
+BLOCK_SHELLS = SHELLS + tuple(sh for sh in ("/bin/bash", "/bin/zsh") if os.path.exists(sh))
+
+
+def join_block():
+    """The command inside the join skill's ```! block."""
+    lines = read(JOIN_SKILL).splitlines()
+    start = lines.index(JOIN_BLOCK[0])
+    return "\n".join(lines[start + 1:start + len(JOIN_BLOCK) - 1]) + "\n"
+
+
+class JoinSkillTest(unittest.TestCase):
+    def test_frontmatter(self):
+        text = read(JOIN_SKILL)
+        self.assertTrue(text.startswith("---\nname: join\ndescription: "))
+        fields = frontmatter(text)
+        # Off the model's skill list (no always-on cost), and the model can't run it: the arguments
+        # are only ever what the human typed.
+        self.assertEqual(fields["disable-model-invocation"], "true")
+        self.assertEqual(fields["argument-hint"], '"[name]"')
+        # The block needs a grant to run; exactly this one, never a wider passnote rule (see test_skill_frontmatter).
+        self.assertEqual(fields["allowed-tools"], "Bash(${CLAUDE_PLUGIN_ROOT}/bin/passnote join *)")
+
+    def test_the_name_reaches_the_cli_through_a_quoted_heredoc(self):
+        lines = read(JOIN_SKILL).splitlines()
+        self.assertEqual(lines.count(JOIN_BLOCK[0]), 1)
+        start = lines.index(JOIN_BLOCK[0])
+        self.assertEqual(tuple(lines[start:start + len(JOIN_BLOCK)]), JOIN_BLOCK)
+        self.assertNotIn('"$ARGUMENTS"', join_block())
+
+
+class JoinSkillShellTest(HomeCase):
+    """The block as Claude Code runs it: arguments and plugin root pasted into the text, then a shell."""
+
+    def setUp(self):
+        super().setUp()
+        if " " in PLUGIN:
+            self.skipTest("the block's unquoted plugin path needs a checkout path without spaces")
+        self.cwd = os.path.join(self.tmp, "cwd")
+        os.makedirs(self.cwd)
+        self.marker = os.path.join(self.tmp, "MARKER")
+
+    def run_block(self, arguments, shell):
+        command = join_block().replace("${CLAUDE_PLUGIN_ROOT}", PLUGIN).replace("$ARGUMENTS", arguments)
+        return subprocess.run([shell, "-c", command], env=self.env(new_sid()), cwd=self.cwd,
+                              capture_output=True, text=True, timeout=30)
+
+    def test_a_typed_name_joins(self):
+        for shell in BLOCK_SHELLS:
+            with self.subTest(shell=shell):
+                name = "bob-" + os.path.basename(shell)  # one room, a new session per shell
+                res = self.run_block(name, shell)
+                self.assertEqual(res.returncode, 0, res.stderr)
+                self.assertRegex(res.stdout, r"^joined cwd \(cwd-[0-9a-f]{4}\) as " + name + "\n")
+
+    def test_no_name_asks_for_one(self):
+        res = self.run_block("", SHELLS[0])
+        self.assertEqual(res.returncode, 2)
+        self.assertIn("/passnote:join <name>", res.stderr)
+
+    def test_shell_syntax_in_the_name_is_never_run(self):
+        m = self.marker
+        payloads = (f"$(touch {m})", f"`touch {m}`", f"'; touch {m}; '", f'"; touch {m}; "', f"${{x:=$(touch {m})}}",
+                    f"bob; touch {m}", f"bob\ntouch {m}")
+        for shell in BLOCK_SHELLS:
+            for payload in payloads:
+                with self.subTest(shell=shell, payload=payload):
+                    res = self.run_block(payload, shell)
+                    self.assertEqual(res.returncode, 2, res.stdout)
+                    self.assertRegex(res.stderr, r"^passnote: (invalid name|/passnote:join takes one name)")
+                    self.assertFalse(os.path.exists(m))
+                    self.assertFalse(os.path.isdir(os.path.join(self.home, "rooms")))
+
+
 class HygieneTest(unittest.TestCase):
     def test_no_tracked_file_holds_a_secret_shaped_literal(self):
         """The repo is public, and GitHub push protection scans history: test fixtures build these
