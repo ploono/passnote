@@ -118,7 +118,7 @@ Credentials are never stored here. They are named by launch-env variables (§4.7
 | subjects | `pn.<room_key>.msg.*`, `pn.<room_key>.ctl.*` | the last token is the origin machine token (§6.3) |
 | storage, retention | file, limits | |
 | `max_age` | 7 days (Q8) | matches `gc`'s 7 days for gone members; the log doesn't live forever |
-| `max_msg_size` | 16 KB | 4,000 characters of text (design §6), escaped, plus fields |
+| `max_msg_size` | 64 KB | The wire serializer is the local log's, `json.dumps(ensure_ascii=True, sort_keys=True)`. 4,000 characters of text (design §6) that are all outside the BMP serialize as surrogate-pair escapes, about 48 KB. So `post` in a remote room also checks the **serialized byte length** of the whole record against 60 KB (exit 4), and a test posts the maximum-length non-BMP text |
 | `duplicate_window` | 10 min | the server dedupes retried publishes by `Nats-Msg-Id` |
 | `deny_delete`, `deny_purge` | true | append-only, like the local log. Nothing can be edited |
 | `allow_direct` | true | cheap reads by sequence for `remote status` and spikes |
@@ -133,7 +133,7 @@ passnote keeps the cursor itself (`last_stream_seq`). Server-side durable consum
 
 **Each pulled record:**
 - skip it if its stream seq is at or below `last_stream_seq`, or its subject's machine token is this machine;
-- parse the payload; reject it if it isn't a valid message or control record;
+- parse the payload. If it isn't a valid message or control record, or it is over the size limit, **skip it durably**: advance `last_stream_seq` past it and append a `remote-rejected` event (stream seq, author, reason; never the payload). A rejected record can never stall the records after it, and a test checks exactly that;
 - dedupe by `(origin, id)` against the last 256 KB of the local log;
 - append it under the room lock with a fresh local seq, the fields of §4.3, and `verified` per §6.3;
 - save `last_stream_seq` after the append. A crash in between re-fetches the record, and the dedupe drops it.
@@ -210,7 +210,7 @@ Existing commands:
 | Key | Where | Default | Notes |
 |---|---|---|---|
 | `remote_pull_seconds` | room or global config | 60 | Minimum 15. Applies only without a follower. Not security-relevant |
-| `PASSNOTE_REMOTES` | launch env | unset | Comma-separated allowlist of targets or prefixes (`nats://nats.team.internal`). Sync and attach refuse anything else |
+| `PASSNOTE_REMOTES` | launch env | unset | Comma-separated allowlist of servers (`nats://nats.team.internal`) or single streams (`nats://nats.team.internal:4222/<room_key>`). Matching is on the **parsed** URL, never on a string prefix: same scheme; hostname equal, compared case-insensitively, with no subdomain or suffix matching; port equal, defaulting to 4222 on both sides; and if the entry has a path, the `room_key` equal. A test rejects lookalikes such as `nats://nats.team.internal.attacker/<room_key>`. Sync and attach refuse anything else |
 | `PASSNOTE_NATS_CERT`, `PASSNOTE_NATS_KEY`, `PASSNOTE_NATS_CA` | launch env | unset | mTLS client cert, key and CA bundle paths |
 | `PASSNOTE_NATS_USER`, `PASSNOTE_NATS_PASSWORD_FILE` | launch env | unset | user/password auth, as an alternative to mTLS |
 | `PASSNOTE_ALLOW_REMOTE_BYPASS` | launch env | unset | `1` lets verified remote lines reach a non-prompting receiver (§6.3) |
