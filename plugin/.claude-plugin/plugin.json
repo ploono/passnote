@@ -1,6 +1,6 @@
 {
   "name": "passnote",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Token-lean messages between Claude Code sessions: shared room logs delivered by hooks, with cache-aware doorbells.",
   "author": {"name": "Nazar Kuzmenko"},
   "homepage": "https://github.com/ploono/passnote",
