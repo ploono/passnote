@@ -87,7 +87,7 @@ _HELD_WORDS = {
     "permission-mode mismatch": "different permission class; only the human sees it unless the receiver allows bypass",
     "receiver mode unknown": "its permission mode is not recorded yet; it is delivered on their next turn if your "
                              "classes match",
-    "sender mode unknown": "your permission mode is not recorded yet; no doorbell",
+    "sender mode unknown": "your permission mode is not recorded yet (join and post in separate turns); no doorbell",
 }
 
 

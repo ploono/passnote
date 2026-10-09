@@ -211,7 +211,7 @@ class PostTest(CliCase):
             with self.subTest(receiver=mode):
                 set_mode(self.b, mode)
                 _, out, _ = self.run_cli(self.a, "post", "--to", "bob", "--kind", "ask", stdin="secret plan?")
-                self.assert_held_wait(out, "your permission mode is not recorded yet; no doorbell")
+                self.assert_held_wait(out, "your permission mode is not recorded yet (join and post in separate turns); no doorbell")
 
     def test_urgent_wakes_a_cold_session(self):
         _, out, _ = self.run_cli(self.a, "post", "--to", "bob", "--urgent", stdin="now")

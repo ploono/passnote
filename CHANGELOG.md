@@ -11,6 +11,9 @@ A release bumps the version in `plugin/.claude-plugin/plugin.json` and
 
 The first release, 0.1.0.
 
+### Changed
+- The `WAIT` line for a sender whose permission mode is not recorded yet now says to join and post in separate turns.
+
 ### Added
 - Posts over 4,000 characters (up to 100,000) are saved whole to a file in the room's directory, and receivers get its path with the clipped text (#27).
 - Seen receipts: a sender's next turn shows `passnote: seen by <name>: <id>` once its addressed ask or prop has been delivered (#28).
