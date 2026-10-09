@@ -11,6 +11,7 @@ A release bumps the version in `plugin/.claude-plugin/plugin.json` and
 
 ### Fixed
 - After `/clear`, a session is no longer delivered its own earlier posts, `passnote read` shows its own earlier asks (`read --id` finds them), and an ask posted just before a `/clear` still gets its seen receipt (#6).
+- A `/clear` interrupted between moving membership and the session record no longer loses the messages waiting to be delivered, and a message re-sent after `/clear` is re-sent at most once (#7).
 
 ## [0.2.0] - 2026-10-09
 

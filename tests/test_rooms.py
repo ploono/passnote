@@ -274,7 +274,8 @@ class RoomsTest(HomeCase):
         sessions.save_emit(self.a, [shown, dropped], [])
         new = new_sid()
         rooms.carry_over(self.a, new)
-        self.assertEqual(sessions.load_emit(new)["overflow"], [{"room": "s", "off": 0, "len": 10, "id": "a1"}])
+        self.assertEqual(sessions.load_emit(new)["overflow"],
+                         [{"room": "s", "off": 0, "len": 10, "id": "a1", "redelivered": True}])
 
     def test_carry_over_twice_is_harmless_and_never_blanks_the_new_rooms(self):
         rooms.join(self.a, "r", "alice", "/root")
@@ -295,6 +296,75 @@ class RoomsTest(HomeCase):
         self.assertEqual([r["id"] for r in state["overflow"]], ["a2", "a1"])
         self.assertEqual([r["id"] for r in state["ahead"]], ["a3"])
         self.assertFalse(os.path.exists(paths.session_dir(self.a)))
+
+    def test_carry_over_moves_the_emit_state_before_the_meta(self):
+        rooms.join(self.a, "r", "alice", "/root")
+        ref = {"room": "r", "off": 0, "len": 10, "id": "b1"}
+        sessions.save_emit(self.a, [], [ref])
+        new = new_sid()
+        real = sessions.update_meta
+
+        def busy_for_new(sid, fn):
+            if sid == new:
+                raise paths.LockBusy
+            return real(sid, fn)
+
+        with mock.patch.object(sessions, "update_meta", busy_for_new):
+            with self.assertRaises(paths.LockBusy):
+                rooms.carry_over(self.a, new)
+        self.assertEqual(sessions.load_emit(new)["overflow"], [ref])  # moved before the commit point
+        self.assertEqual(sessions.load_meta(new)["rooms"], [])
+        rooms.carry_over(self.a, new)  # the retry finishes, without duplicating the ref
+        self.assertEqual(sessions.load_emit(new)["overflow"], [ref])
+        self.assertEqual(sessions.load_meta(new)["rooms"], ["r"])
+
+    def test_carry_over_retried_after_a_busy_meta_carries_every_emit_list_once(self):
+        rooms.join(self.a, "r", "alice", "/root")
+        ref = {"room": "r", "off": 0, "len": 10}
+        sessions.save_emit(self.a, [dict(ref, id="e1", line="e1 bob→all say: hi")], [dict(ref, id="o1")],
+                           [dict(ref, id="h1", seq=3)], [dict(ref, id="s1")], [dict(ref, id="d1")])
+        new = new_sid()
+        real = sessions.update_meta
+
+        def busy_for_new(sid, fn):
+            if sid == new:
+                raise paths.LockBusy
+            return real(sid, fn)
+
+        with mock.patch.object(sessions, "update_meta", busy_for_new):
+            with self.assertRaises(paths.LockBusy):
+                rooms.carry_over(self.a, new)
+        self.assertTrue(os.path.isdir(paths.session_dir(self.a)))  # the source survives the failed commit
+        rooms.carry_over(self.a, new)
+        state = sessions.load_emit(new)
+        self.assertEqual(state["overflow"], [dict(ref, id="o1"), dict(ref, id="e1", redelivered=True)])
+        self.assertEqual(state["ahead"], [dict(ref, id="h1", seq=3)])
+        self.assertEqual(state["receipts"], [dict(ref, id="s1")])
+        self.assertEqual(state["delivered"], [dict(ref, id="d1")])
+        self.assertEqual(sessions.load_meta(new)["rooms"], ["r"])
+        self.assertFalse(os.path.exists(paths.session_dir(self.a)))
+
+    def test_carry_over_marks_unconfirmed_emissions_redelivered_and_leaves_overflow_unmarked(self):
+        rooms.join(self.a, "r", "alice", "/root")
+        emitted = {"room": "r", "off": 0, "len": 10, "id": "b1", "line": "b1 bob→all say: hi"}
+        overflow = {"room": "r", "off": 20, "len": 10, "id": "b2"}
+        sessions.save_emit(self.a, [emitted], [overflow])
+        new = new_sid()
+        rooms.carry_over(self.a, new)  # no transcript recorded: nothing confirms the emission
+        self.assertEqual(sessions.load_emit(new)["overflow"],
+                         [overflow, {"room": "r", "off": 0, "len": 10, "id": "b1", "redelivered": True}])
+
+    def test_carry_over_passes_its_lock_timeout_to_the_room_lock(self):
+        rooms.join(self.a, "r", "alice", "/root")
+        real, timeouts = store.room_lock, []
+
+        def spy(room, *args, **kwargs):
+            timeouts.append(kwargs.get("timeout"))
+            return real(room, *args, **kwargs)
+
+        with mock.patch.object(store, "room_lock", spy):
+            rooms.carry_over(self.a, new_sid(), lock_timeout=0.7)
+        self.assertEqual(timeouts, [0.7])
 
     # -- gc (ticket 01): never prune a running session, however old ---------
 

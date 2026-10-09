@@ -12,6 +12,9 @@ import time
 from . import cursor, paths, sessions, store, transcript
 
 RENAME_LOCK_TIMEOUT = 1.0
+# Seconds carry_over waits for each room lock. SessionStart's 5 s timeout must fit an attempt and a
+# retry (hook.CARRY_BUDGET).
+CARRY_LOCK_TIMEOUT = 2.0
 # A member's delivery preferences in its members.json entry (#25): kept on a re-join by the
 # same session, moved whole by carry_over, dropped by leave and by a takeover.
 PREF_KEYS = ("threads", "digest")
@@ -230,12 +233,13 @@ def rename(sid, room_list, new_name, now=None) -> bool:
     return True
 
 
-def carry_over(old_sid, new_sid) -> None:
+def carry_over(old_sid, new_sid, lock_timeout=CARRY_LOCK_TIMEOUT) -> None:
     """/clear: move membership, cursors and meta from the old session id to the new one.
     The member keeps the old id in its prev_sids (the last store.MAX_PREV_SIDS), so its claims,
     asks and messages from before the /clear still count as its own (store.member_for_sid).
     Safe to run again after a LockBusy or a kill part-way: a moved room is skipped, and the old
-    session (the source of truth until its dir is removed at the end) still lists the rest."""
+    session (the source of truth until its dir is removed at the end) still lists the rest. The
+    emit state moves before the new meta, whose write is the commit point."""
     import shutil
     old = sessions.load_meta(old_sid)
     if not old["rooms"]:
@@ -243,7 +247,7 @@ def carry_over(old_sid, new_sid) -> None:
     # First, so the moved member is never briefly "gone" (is_running is False without the dir).
     paths.makedirs(paths.session_dir(new_sid))
     for room in old["rooms"]:
-        with store.room_lock(room, timeout=2.0):
+        with store.room_lock(room, timeout=lock_timeout):
             members = store.load_members(room)
             if old_sid in members:
                 info = members.pop(old_sid)
@@ -263,8 +267,11 @@ def carry_over(old_sid, new_sid) -> None:
             new["pid"], new["pid_started_at"] = old.get("pid"), old.get("pid_started_at")
         new["rooms"] = list(old["rooms"])
 
-    sessions.update_meta(new_sid, inherit)
+    # The emit state before the meta (#7): once the new meta lists the rooms, the session counts as
+    # joined and no fire heals it again, so everything must have moved by then. Re-running is
+    # harmless: _carry_emit merges without duplicates.
     _carry_emit(old_sid, new_sid, old)
+    sessions.update_meta(new_sid, inherit)
     shutil.rmtree(paths.session_dir(old_sid), ignore_errors=True)
 
 
@@ -280,8 +287,9 @@ def _carry_emit(old_sid, new_sid, old_meta) -> None:
     emitted = [ref for ref in old_emit["emitted"] if isinstance(ref, dict)]
     path = old_meta.get("transcript_path")
     missing = transcript.unconfirmed(path if isinstance(path, str) else None, emitted)
-    # Carried as overflow, to be rendered (and its line recorded) again.
-    unconfirmed = [{key: value for key, value in ref.items() if key != "line"}
+    # Carried as overflow, to be rendered (and its line recorded) again, at most once more: marked
+    # redelivered, as _take_from_last_fire marks its own (#7). Old overflow was never emitted: unmarked.
+    unconfirmed = [dict({key: value for key, value in ref.items() if key != "line"}, redelivered=True)
                    for ref in (emitted if missing is None else missing)]
 
     def merged(*lists):
