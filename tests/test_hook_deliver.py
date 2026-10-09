@@ -819,7 +819,7 @@ class ReceiptTest(DeliverCase):
         self.deliver(self.b)  # bob's turn delivers both
         self.assertIn("passnote: seen [r] by bob: a1; [r2] by bob: a1", self.context(self.deliver(self.a)))
 
-    def _two_room_receipt(self, displays):
+    def _two_room_receipt(self, displays, extra=()):
         join(self.a, "r2", "alice")
         join(self.b, "r2", "bob")
         for room, display in displays.items():
@@ -828,6 +828,8 @@ class ReceiptTest(DeliverCase):
             store.save_meta(room, meta)
         post(self.a, "r", "q1", kind="ask", to=["bob"])
         post(self.a, "r2", "q2", kind="ask", to=["bob"])
+        for room in extra:
+            post(self.a, room, "q", kind="ask", to=["bob"])
         self.deliver(self.a)
         self.deliver(self.b)
         return self.context(self.deliver(self.a))
@@ -844,6 +846,37 @@ class ReceiptTest(DeliverCase):
     def test_a_display_equal_to_another_rooms_id_is_labelled_by_room_id(self):
         self.assertIn("passnote: seen [r] by bob: a1; [r2] by bob: a1",
                       self._two_room_receipt({"r2": "r"}))
+
+    def test_labels_stay_distinct_when_a_fallback_id_meets_another_display(self):
+        join(self.a, "r3", "alice")
+        join(self.b, "r3", "bob")
+        # r2 and r3 share "x", so both fall back to their ids; r2's id then meets r's display
+        displays = {"r": "r2", "r2": "x", "r3": "x"}
+        line = self._two_room_receipt(displays, extra=("r3",))
+        self.assertTrue(line.startswith("passnote: seen "))  # a single pass gives "[r2] by bob: a1, a1"
+        self.assertEqual(sorted(line[len("passnote: seen "):].split("; ")),
+                         sorted(["[r] by bob: a1", "[r2] by bob: a1", "[r3] by bob: a1"]))
+
+    def test_receipt_labels_load_only_the_rooms_of_live_pending_entries(self):
+        now = time.time()
+        calls = []
+
+        class Fire:
+            sid, rooms = self.a, ["r", "r2", "r3"]
+            pending = [{"room": "r", "id": "a1", "seq": 1, "ts": now, "to": ["bob"]},
+                       {"room": "r3", "id": "a1", "seq": 1, "ts": now - hook.RECEIPT_MAX_AGE - 1, "to": ["bob"]}]
+
+            def room(self, room):
+                calls.append(room)
+                return {}, room, "allow", "alice"
+
+        hook._receipts(Fire(), now)
+        self.assertEqual(set(calls), {"r"})
+        calls.clear()
+        fire = Fire()
+        fire.pending = fire.pending[1:]  # only an expired entry
+        hook._receipts(fire, now)
+        self.assertEqual(calls, [])
 
     def test_a_forged_room_display_falls_back_to_the_room_id_in_the_label(self):
         join(self.a, "r2", "alice")

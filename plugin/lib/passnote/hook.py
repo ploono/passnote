@@ -334,16 +334,16 @@ def _delivered(previous, emitted, now):
     return out[-MAX_DELIVERED:], added
 
 
-def _receipt_labels(fire):
-    """{room: label} for the receipt line: None for each room when the session is in one room (ids
-    only repeat across rooms), else the room's display when it is a valid name no other joined room's
-    label shares, and the room id otherwise. Room ids are unique valid names, so a shared label (two
-    displays alike, or a display equal to another room's id) falls back to the ids: one label for two
-    rooms would group their ids together."""
+def _receipt_labels(fire, rooms):
+    """{room: label} for the rooms that can appear on this fire's receipt line: None for each when the
+    session is in one room (ids only repeat across rooms), else the room's display when it is a valid
+    name no other of these rooms' labels shares, and the room id otherwise. Room ids are unique valid
+    names, so a shared label (two displays alike, or a display equal to another room's id) falls back
+    to the ids: one label for two rooms would group their ids together. Only these rooms are loaded."""
     if len(fire.rooms) <= 1:
-        return {room: None for room in fire.rooms}
+        return dict.fromkeys(rooms)
     labels = {}
-    for room in fire.rooms:
+    for room in rooms:
         display = fire.room(room)[1]
         labels[room] = display if paths.valid_name(display) else room
     while True:
@@ -369,7 +369,8 @@ def _receipts(fire, now):
     drops a name. An addressee who is gone or listed under an invalid sid is dropped for good. A
     seen pair the line has no room for stays for next fire."""
     pending, found, emits = [], [], {}
-    labels = _receipt_labels(fire) if fire.pending else {}
+    labels = _receipt_labels(fire, dict.fromkeys(entry["room"] for entry in fire.pending
+                                                 if now - entry["ts"] <= RECEIPT_MAX_AGE))
     for entry in fire.pending:
         if now - entry["ts"] > RECEIPT_MAX_AGE:
             continue

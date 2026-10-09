@@ -488,8 +488,7 @@ class BuildTest(unittest.TestCase):
                 line = render._fallback_line(dict(item(m, room="r1"), display="api"), True)
                 self.assertEqual(line, f"[api] {long_id} (too large to show in this turn; "
                                        f"passnote read --id {long_id})")
-                read_id = line.rsplit("passnote read --id ", 1)[1].rstrip(")")
-                self.assertEqual([x for x in (m,) if x["id"] == read_id], [m])  # read --id matches exactly
+                self.assertEqual(line.rsplit("passnote read --id ", 1)[1], long_id + ")")  # the whole id
                 self.assertLess(len(json.dumps(line)), 2500)
 
     def test_the_fallback_line_still_clips_a_forged_long_id(self):
@@ -498,6 +497,13 @@ class BuildTest(unittest.TestCase):
         clipped = render.clip_field(forged)
         self.assertEqual(line, f"{clipped} (too large to show in this turn; passnote read --id {clipped})")
         self.assertNotIn(forged, line)
+
+    def test_the_fallback_line_clips_an_id_with_a_valid_start_and_junk(self):
+        forged = "a1" + "x" * 200  # its head matches the id shape; the whole does not
+        line = render._fallback_line(item(msg(id=forged)), False)
+        self.assertTrue(line.startswith(render.clip_field(forged) + " "))
+        self.assertNotIn(forged, line)
+        self.assertLess(len(json.dumps(line)), 2500)
 
     def test_the_overflow_line_still_names_an_id_after_the_first_line_shrinks(self):  # (pinning, #31 C2)
         items = [dict(item(msg(id="a1", seq=1, to=["bob"], kind="ask", text="\U0001F600" * 1500)), clip=1500),

@@ -119,7 +119,7 @@ Real design choices, each with its reason. A reviewer should check the code agai
    - It is never delivery evidence for a seen receipt, because its text didn't reach the model.
 6. **Log-line clamp:** `store.LOG_LINE_MAX = 64 * 1024` bytes per log line, measured on the encoded record, not by a per-character estimate. A text whose escaped prefix wouldn't fit keeps a shorter prefix and gets a full-text file. A post whose other fields alone (an unbounded `--re`) exceed the cap is refused with exit 2.
 7. **A forged huge `seq` gets a clear error only.** `last_seq` is not bounded (see Triage R3).
-8. **Receipt room labels** use the room's display name when it is a valid name (ASCII, as delivered lines show it), else the room id. They appear only when the session is in more than one room, so a single-room receipt line is unchanged. Amended in review: a label two joined rooms would share (alike displays, or a display equal to another room's id) falls back to the room ids, so one label never groups two rooms' ids.
+8. **Receipt room labels** use the room's display name when it is a valid name (ASCII, as delivered lines show it), else the room id. They appear only when the session is in more than one room, so a single-room receipt line is unchanged. Amended in review: a label two rooms on the receipt line would share (alike displays, or a display equal to another room's id) falls back to the room ids, so one label never groups two rooms' ids.
 9. **#9 is documented, not fixed.** See Triage.
 
 ## Review Focus
