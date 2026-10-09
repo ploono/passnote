@@ -346,11 +346,13 @@ def _receipts(fire, now):
     drops a name. An addressee who is gone or listed under an invalid sid is dropped for good. A
     seen pair the line has no room for stays for next fire."""
     pending, found, emits = [], [], {}
+    multi = len(fire.rooms) > 1  # ids repeat across rooms: label them only then
     for entry in fire.pending:
         if now - entry["ts"] > RECEIPT_MAX_AGE:
             continue
         room, msg_id, seq = entry["room"], entry["id"], entry["seq"]
-        members, _, inbound, _ = fire.room(room)
+        members, display, inbound, _ = fire.room(room)
+        label = (display if paths.valid_name(display) else room) if multi else None
         sid_of = {info["name"]: sid for sid, info in members.items()}
         kept = dict(entry, to=[])
         for name in dict.fromkeys(entry["to"]):
@@ -370,12 +372,12 @@ def _receipts(fire, now):
                                   inbound, {}):
                 continue
             kept["to"].append(name)  # until the line shows it
-            found.append((kept, name, msg_id))
+            found.append((kept, name, msg_id, label))
         pending.append(kept)
-    _, shown = render.receipt_parts([(name, msg_id) for _, name, msg_id in found])
+    _, shown = render.receipt_parts([(name, msg_id, label) for _, name, msg_id, label in found])
     left = len(shown)
-    for kept, name, msg_id in found:
-        valid = render.receipt_pair_ok(name, msg_id)
+    for kept, name, msg_id, label in found:
+        valid = render.receipt_pair_ok(name, msg_id, label)
         if valid and left == 0:
             continue  # cut for length: stays pending
         kept["to"].remove(name)  # shown, or never showable

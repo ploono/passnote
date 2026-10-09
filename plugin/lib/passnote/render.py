@@ -242,37 +242,45 @@ def _fallback_line(it, multi) -> str:
     return line
 
 
-def receipt_pair_ok(name, msg_id) -> bool:
-    """Whether a (name, id) pair may appear in a receipt line: a valid member name and a message id
-    of the full-text id shape. Both are ASCII and need no escaping."""
-    return paths.valid_name(name) and isinstance(msg_id, str) and bool(store.FULL_TEXT_ID_RE.fullmatch(msg_id))
+def receipt_pair_ok(name, msg_id, room=None) -> bool:
+    """Whether a (name, id[, room label]) may appear in a receipt line: a valid member name, a message id
+    of the full-text id shape, and a label that is None or a valid name. All ASCII, needing no escaping."""
+    return (paths.valid_name(name) and isinstance(msg_id, str) and bool(store.FULL_TEXT_ID_RE.fullmatch(msg_id))
+            and (room is None or paths.valid_name(room)))
 
 
-def _receipt_text(by_name) -> str:
-    return "passnote: seen " + "; ".join(f"by {name}: {', '.join(ids)}" for name, ids in by_name.items())
+def _receipt_text(by_room) -> str:
+    """by_room: {room label or None: {name: [ids]}}, in first-seen order."""
+    parts = []
+    for room, by_name in by_room.items():
+        names = "; ".join(f"by {name}: {', '.join(ids)}" for name, ids in by_name.items())
+        parts.append(f"[{room}] {names}" if room else names)
+    return "passnote: seen " + "; ".join(parts)
 
 
 def receipt_parts(pairs):
-    """(line, shown): the receipt line for (name, id) pairs, grouped by name in first-seen order,
-    and the pairs it shows. Invalid pairs are dropped. Pairs are added one at a time until the
-    next would take the line past RECEIPT_MAX_CHARS; a lone valid pair always fits, so a caller
-    that keeps the pairs not shown for later always makes progress. (None, []) when none is valid."""
-    by_name, shown = {}, []
-    for name, msg_id in pairs:
-        if not receipt_pair_ok(name, msg_id):
+    """(line, shown): the receipt line for (name, id) or (name, id, room label) pairs, grouped by label
+    then name in first-seen order, and the pairs it shows (as given). Invalid pairs are dropped. Pairs
+    are added one at a time until the next would take the line past RECEIPT_MAX_CHARS; a lone valid
+    pair always fits, so a caller that keeps the pairs not shown for later always makes progress.
+    (None, []) when none is valid."""
+    by_room, shown = {}, []
+    for pair in pairs:
+        name, msg_id, room = (tuple(pair) + (None,))[:3]
+        if not receipt_pair_ok(name, msg_id, room):
             continue
-        trial = {key: list(ids) for key, ids in by_name.items()}
-        trial.setdefault(name, []).append(msg_id)
+        trial = {label: {key: list(ids) for key, ids in names.items()} for label, names in by_room.items()}
+        trial.setdefault(room, {}).setdefault(name, []).append(msg_id)
         if len(_receipt_text(trial)) > RECEIPT_MAX_CHARS:
             break
-        by_name = trial
-        shown.append((name, msg_id))
-    return (_receipt_text(by_name) if shown else None), shown
+        by_room = trial
+        shown.append(pair)
+    return (_receipt_text(by_room) if shown else None), shown
 
 
 def receipt_line(pairs):
-    """'passnote: seen by bob: a1, a3; by carol: a1' for (name, id) pairs, ASCII only (invalid names
-    or ids are dropped), at most RECEIPT_MAX_CHARS long; None when nothing is left."""
+    """'passnote: seen by bob: a1, a3; by carol: a1' for (name, id) pairs ('passnote: seen [r1] by bob: a1'
+    for (name, id, room label)), ASCII only (invalid names, ids or labels are dropped), at most RECEIPT_MAX_CHARS long; None when nothing is left."""
     return receipt_parts(pairs)[0]
 
 

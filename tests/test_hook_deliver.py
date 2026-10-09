@@ -810,6 +810,28 @@ class ReceiptTest(DeliverCase):
         self.assertEqual(self.seen_line(self.a), "passnote: seen by bob: a1")
         self.assertIsNone(self.seen_line(self.a))   # at most once per message
 
+    def test_a_sender_in_two_rooms_gets_room_labelled_receipts(self):
+        join(self.a, "r2", "alice")
+        join(self.b, "r2", "bob")
+        post(self.a, "r", "q1", kind="ask", to=["bob"])
+        post(self.a, "r2", "q2", kind="ask", to=["bob"])
+        self.deliver(self.a)  # alice's cursors pass both: pending
+        self.deliver(self.b)  # bob's turn delivers both
+        self.assertIn("passnote: seen [r] by bob: a1; [r2] by bob: a1", self.context(self.deliver(self.a)))
+
+    def test_a_forged_room_display_falls_back_to_the_room_id_in_the_label(self):
+        join(self.a, "r2", "alice")
+        join(self.b, "r2", "bob")
+        meta = store.load_meta("r2")
+        meta["display"] = "\U0001F600" * 64
+        store.save_meta("r2", meta)
+        post(self.a, "r2", "q2", kind="ask", to=["bob"])
+        self.deliver(self.a)
+        self.deliver(self.b)
+        line = self.context(self.deliver(self.a))
+        self.assertEqual(line, "passnote: seen [r2] by bob: a1")
+        self.assertTrue(line.isascii())
+
     def test_a_receipt_alone_is_the_whole_context(self):
         post(self.a, "r", "review?", kind="ask", to=["bob"])
         self.deliver(self.a)

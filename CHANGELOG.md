@@ -19,6 +19,9 @@ A release bumps the version in `plugin/.claude-plugin/plugin.json` and
 - A long post in a room whose log holds a forged huge `seq` is refused with a clear message (#31).
 - Two `subscribe`/`unsubscribe` commands at once no longer lose one of the changes, and `who` lists at most 8 threads per member (#31).
 
+### Changed
+- Seen receipts name the room (`passnote: seen [<room>] by <name>: <id>`) when you are in more than one room, since ids repeat across rooms (#31).
+
 ## [0.2.0] - 2026-10-09
 
 The first tagged release. Copies installed from `main` before it report 0.1.0.

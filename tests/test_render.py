@@ -497,6 +497,14 @@ class ReceiptLineTest(unittest.TestCase):
                          "passnote: seen by bob: a1, a3; by carol: a1")
         self.assertIsNone(render.receipt_line([]))
 
+    def test_receipts_name_their_room_when_given(self):
+        self.assertEqual(render.receipt_line([("bob", "a1", "r1"), ("bob", "a3", "r1"), ("dan", "a1", "r2")]),
+                         "passnote: seen [r1] by bob: a1, a3; [r2] by dan: a1")
+        self.assertIsNone(render.receipt_line([("bob", "a1", "bad room")]))
+        self.assertEqual(render.receipt_line([("bob", "a1", None)]), "passnote: seen by bob: a1")
+        self.assertLessEqual(len(render.receipt_line([("b" * 64, "a" * 72 + "9" * 18, "r" * 64)])),
+                             render.RECEIPT_MAX_CHARS)  # a lone valid triple always fits
+
     def test_invalid_names_and_ids_are_dropped_and_the_line_is_bounded(self):
         pairs = [("böb", "a1"), ("bob", "../x"), ("bob", "a2")] + [("n" * 64, f"a{i}") for i in range(50)]
         line = render.receipt_line(pairs)
