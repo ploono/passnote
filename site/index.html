@@ -29,7 +29,7 @@
   "@context": "https://schema.org",
   "@graph": [
     {"@type": "WebSite", "@id": "https://ploono.github.io/passnote/#website", "url": "https://ploono.github.io/passnote/", "name": "passnote", "inLanguage": "en"},
-    {"@type": "SoftwareApplication", "@id": "https://ploono.github.io/passnote/#app", "name": "passnote", "description": "A free, open-source Claude Code plugin that lets the Claude Code sessions on one computer leave each other notes, which each session reads on its next step.", "url": "https://ploono.github.io/passnote/", "applicationCategory": "DeveloperApplication", "operatingSystem": "macOS, Linux", "softwareVersion": "0.1.0", "license": "https://opensource.org/licenses/MIT", "isAccessibleForFree": true, "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}, "author": {"@type": "Person", "name": "Nazar Kuzmenko"}, "sameAs": ["https://github.com/ploono/passnote"]},
+    {"@type": "SoftwareApplication", "@id": "https://ploono.github.io/passnote/#app", "name": "passnote", "description": "A free, open-source Claude Code plugin that lets the Claude Code sessions on one computer leave each other notes, which each session reads on its next step.", "url": "https://ploono.github.io/passnote/", "applicationCategory": "DeveloperApplication", "operatingSystem": "macOS, Linux", "softwareVersion": "0.2.0", "license": "https://opensource.org/licenses/MIT", "isAccessibleForFree": true, "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}, "author": {"@type": "Person", "name": "Nazar Kuzmenko"}, "sameAs": ["https://github.com/ploono/passnote"]},
     {"@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Do I need to know how to code?", "acceptedAnswer": {"@type": "Answer", "text": "No. You install passnote by pasting two lines into Claude Code, then ask each session to join. After that, your sessions write and read the notes themselves. You see a short line whenever a note arrives, and you can ask Claude what it said."}}, {"@type": "Question", "name": "Is it free?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. passnote is free and open source under the MIT licence, with no paid tier. It runs on your own computer, so there’s no account and no server. Each note uses a little of your Claude usage, far less than waking a session."}}, {"@type": "Question", "name": "Does it upload anything?", "acceptedAnswer": {"@type": "Answer", "text": "passnote itself sends nothing anywhere. Rooms are plain files on your computer, in ~/.local/state/passnote by default. A note reaches Claude the same way the rest of your session does, through your usual Claude Code connection."}}, {"@type": "Question", "name": "Does it work in the Claude desktop app?", "acceptedAnswer": {"@type": "Answer", "text": "passnote works through Claude Code’s plugin hooks and is tested in Claude Code in the terminal, on macOS and Linux. Other ways of running Claude Code may work too, but they haven’t been tested yet, so the terminal is the safe choice for now."}}]}
   ]
 }
@@ -187,7 +187,7 @@
       <source media="(prefers-color-scheme: dark)" srcset="assets/sly-dark.svg">
       <img src="assets/sly.svg" alt="Sly, the passnote mascot: a folded note glancing sideways" width="40" height="40">
     </picture>
-    <span>passnote v0.1.0</span>
+    <span>passnote v0.2.0</span>
     <a href="https://github.com/ploono/passnote">GitHub</a>
     <a href="https://github.com/ploono/passnote/blob/main/LICENSE">MIT licence</a>
     <a href="https://github.com/ploono/passnote/blob/main/SECURITY.md">Security</a>

@@ -9,7 +9,9 @@ A release bumps the version in `plugin/.claude-plugin/plugin.json` and
 
 ## [Unreleased]
 
-The first release, 0.1.0.
+## [0.2.0] - 2026-10-09
+
+The first tagged release. Copies installed from `main` before it report 0.1.0.
 
 ### Added
 - `/passnote:join [name]` joins this repo's room from the prompt, as the name you type or, with none, the session's `/rename` name. It runs `passnote join --name-stdin` before the model's turn, so no tool call is needed, and it isn't in the model's skill list (#5).
