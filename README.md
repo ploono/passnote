@@ -70,11 +70,11 @@ run inside a Claude Code session, where its output would reach the model.
 ![Sessions post by appending to a room's log. Each session's hook adds the new lines to a turn it is already taking. A doorbell wakes an idle session only when a message needs it now. You follow every room with passnote watch --all in your own terminal.](assets/readme/architecture.svg)
 
 - Each room is an append-only JSONL log in `~/.local/state/passnote/rooms/<room>/`. Every session keeps a byte-offset cursor per room.
-- `UserPromptSubmit` and `PostToolBatch` hooks deliver new lines (at most 2,000 characters per turn, addressed asks first; a message is clipped at 1,500 characters when it is addressed to you by name, 600 otherwise; non-Latin text may clip earlier, because it costs more of the 8 KB hook output) and advance the cursor. A tiny sh guard exits in milliseconds for sessions that haven't joined.
+- `UserPromptSubmit` and `PostToolBatch` hooks deliver new lines (at most 2,000 characters per turn, addressed asks first; a message is clipped at 1,500 characters when it is addressed to you by name, 600 otherwise; non-ASCII text may clip earlier, because it costs more of the 8 KB hook output) and advance the cursor. A tiny sh guard exits in milliseconds for sessions that haven't joined.
 - `SessionStart` and `SessionEnd` hooks keep membership across `/clear`, `/resume` and compaction. Subagents never consume their parent's messages.
 - When a post needs an idle member, `passnote post` prints a SendMessage doorbell line, but only while that member's session is running and its prompt cache is warm, and at most 3 times per 10 minutes. Otherwise it prints `WAIT`, and the message waits for the member's next turn. A gone member (its session ended) is never woken, even with `--urgent`; it sees the message when the session is resumed. Nor is a member the post may be held from (see Trust and safety, or either mode not recorded yet): it prints `WAIT <name> held (<reason>)`, because Claude Code would hold the doorbell too, and each hold notice costs the sender a turn. A doorbell carries only the message id and sender (`<id> from <sender>: passnote note waiting`); the receiver reads the text from the hook, once.
 - A post over 4,000 characters (up to 100,000) keeps its first 4,000 in the log; the whole text goes to `rooms/<room>/files/<id>.txt` (mode 0600), and the delivered line ends with that path. The file is removed with the room's data (`passnote uninstall --purge`).
-- After an addressee's turn delivers your `ask` or `prop`, your next turn shows one line, `passnote: seen by <name>: <id>` (at most once per addressee and message, at most 6 per turn). No message is sent for it: your hook reads the record the addressee's hook keeps of what it delivered. A held message is never reported seen.
+- After an addressee's turn delivers your `ask` or `prop`, your next turn shows one line, `passnote: seen by <name>: <id>` (at most once per addressee and message, at most 6 per turn; in more than one room, each room's ids follow `[<room>]`). No message is sent for it: your hook reads the record the addressee's hook keeps of what it delivered. A held message is never reported seen.
 
 ### One hook run
 ![One hook run: a sh guard exits in milliseconds for sessions that haven't joined; subagents are skipped; with nothing new it exits at zero tokens; otherwise it filters out your own lines, lines for others and status lines, holds messages from another permission class (or under an inbound hold) for you only, renders up to 2,000 characters with asks first, and adds them to the turn.](assets/readme/delivery.svg)
@@ -140,6 +140,11 @@ filesystem: passnote relies on `flock`, which network filesystems don't reliably
 ended or can't be found, once they have been inactive for 7 days (run `passnote gc --days N` yourself
 to use another limit; the gc that `join` runs always uses 7 days). A session that is still running
 is never removed, and one you close and later resume keeps its rooms within that time.
+
+Don't delete or replace a room's `log.jsonl` by hand while sessions are joined to it: a member
+that hasn't had a turn since can miss the first messages of the new log. To start a room afresh,
+have every member run `passnote leave` first. A gone member can't run it: wait until gc has removed gone members, or accept that they may miss the first messages if resumed.
+
 `passnote uninstall --purge` deletes all data after you type `purge` to confirm; then run
 `/plugin uninstall passnote`.
 

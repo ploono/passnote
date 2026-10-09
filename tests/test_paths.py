@@ -105,6 +105,19 @@ class PathsTest(HomeCase):
                 else:
                     self.assertEqual(paths.check_sid(value), expected)
 
+    def test_valid_sid(self):
+        self.assertTrue(paths.valid_sid("0f1e2d3c-4b5a-4968-8776-655443322110"))
+        for bad in ("../x", "", None, 5, "S-A"):
+            self.assertFalse(paths.valid_sid(bad), bad)
+
+    def test_atomic_write_text_writes_0600_and_leaves_no_temp_file(self):
+        path = os.path.join(paths.ensure_home(), "rooms", "r", "files", "a1.txt")
+        paths.atomic_write_text(path, "漢\nline two")
+        with open(path, encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), "漢\nline two")
+        self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
+        self.assertEqual(os.listdir(os.path.dirname(path)), ["a1.txt"])
+
     def test_atomic_write_json_is_private(self):
         paths.ensure_home()
         target = os.path.join(self.home, "sub", "x.json")

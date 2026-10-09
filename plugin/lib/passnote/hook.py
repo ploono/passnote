@@ -97,21 +97,23 @@ def handle_deliver(inp, event, env, now=None):
         return None  # a subagent's own hook: its session_id is the parent's (A8)
     sid = paths.check_sid(inp.get("session_id"))
     meta = sessions.load_meta(sid)
+    healed = False
     if not meta["rooms"]:
         # Maybe a /clear whose carry-over didn't finish (SessionStart fires once): finish it now.
         try:
-            if not _carry_over_from_clear(sid, sessions.parse_pid(env.get("CLAUDE_PID"))):
-                return None
+            healed = _carry_over_from_clear(sid, sessions.parse_pid(env.get("CLAUDE_PID")))
         except paths.LockBusy:
             return None
         meta = sessions.load_meta(sid)
-        if not meta["rooms"]:
+        if not healed or not meta["rooms"]:
             return None
     sessions.touch_active(sid, now)
     try:
         meta = _refresh_meta(sid, meta, inp, event, env)
         with sessions.session_lock(sid):
-            return _deliver_locked(sid, meta, inp, event, env)
+            # The fire that healed a carry also says who the session is, as SessionStart would have
+            # (#7). The heal released the lock: a fire that wins it first delivers without the line.
+            return _deliver_locked(sid, meta, inp, event, env, reminder=_reminder(sid, meta) if healed else None)
     except paths.LockBusy:
         return None  # another fire holds the session or its meta: the next fire delivers
 
@@ -185,7 +187,8 @@ class _Fire:
                 self.ahead.setdefault(ref["room"], []).append(ref)
         self.ahead_keys = {(ref["room"], ref["id"], ref["seq"]) for refs in self.ahead.values() for ref in refs}
         # This session's addressed asks and props waiting to be reported seen (see _receipts).
-        self.pending = [entry for entry in receipts if _valid_receipt(entry, self.rooms)][-MAX_PENDING_RECEIPTS:]
+        now = time.time()
+        self.pending = [entry for entry in receipts if _valid_receipt(entry, self.rooms, now)][-MAX_PENDING_RECEIPTS:]
 
     def track(self, room, msg):
         """The sender's own addressed ask or prop, passed by its own cursor: wait to report it seen."""
@@ -233,8 +236,8 @@ class _Fire:
         return self.prefs_cache[room]
 
     def verdict(self, room, msg):
-        _, _, inbound, me = self.room(room)
-        action, reason = trust.visibility(msg, self.sid, me, self.receiver_mode, inbound, self.env)
+        members, _, inbound, me = self.room(room)
+        action, reason = trust.visibility(msg, self.sid, me, self.receiver_mode, inbound, self.env, members)
         if action == "deliver":
             threads, _ = self.prefs(room)
             thread = render.thread_of(msg)
@@ -290,12 +293,14 @@ def _finite(value) -> bool:
         return False
 
 
-def _valid_receipt(entry, rooms_joined) -> bool:
-    """A pending receipt as track() records it; anything else in the emit state is dropped."""
+def _valid_receipt(entry, rooms_joined, now) -> bool:
+    """A pending receipt as track() records it; anything else in the emit state is dropped, and so is a
+    ts in the future (#31): it would never age out."""
     if not isinstance(entry, dict) or entry.get("room") not in rooms_joined:
         return False
     seq, to = entry.get("seq"), entry.get("to")
     return (isinstance(seq, int) and not isinstance(seq, bool) and seq >= 1 and _finite(entry.get("ts"))
+            and entry["ts"] <= now
             and isinstance(to, list) and all(render.receipt_pair_ok(name, entry.get("id")) for name in to)
             and (entry.get("mode") is None or isinstance(entry.get("mode"), str)))
 
@@ -308,22 +313,48 @@ def _valid_evidence(entry) -> bool:
 
 
 def _delivered(previous, emitted, now):
-    """This session's delivery evidence after a fire: the addressed (by name) asks and props it
-    emitted to its model, as {room, id, seq, ts}. Only lines emitted whole count, never held,
-    overflowing or digested ones (a digest line doesn't show the text), so a sender's receipt can't
-    report a held message seen. Bounded: the last MAX_DELIVERED, none older than RECEIPT_MAX_AGE;
-    malformed entries are dropped."""
+    """(evidence, added): this session's delivery evidence after a fire, and whether this fire added
+    any. Evidence is the addressed (by name) asks and props it emitted to its model, as
+    {room, id, seq, ts}. Only lines emitted whole count, never held, overflowing, digested or
+    fallback ones (their text didn't reach the model), so a sender's receipt can't report a held
+    message seen. Bounded: the last MAX_DELIVERED, none older than RECEIPT_MAX_AGE or dated in the
+    future; malformed entries are dropped."""
     out = [entry for entry in previous[-MAX_DELIVERED:]
-           if _valid_evidence(entry) and now - entry["ts"] <= RECEIPT_MAX_AGE]
+           if _valid_evidence(entry) and 0 <= now - entry["ts"] <= RECEIPT_MAX_AGE]
     keys = {(entry["room"], entry["id"], entry["seq"]) for entry in out}
+    added = False
     for it in emitted:
         msg = it["msg"]
         key = (it["room"], msg["id"], msg["seq"])
-        if (msg.get("kind") in RECEIPT_KINDS and render.addressed_by_name(msg, it.get("me")) and not it.get("digest")
-                and key not in keys):
+        if (msg.get("kind") in RECEIPT_KINDS and render.addressed_by_name(msg, it.get("me"))
+                and not it.get("digest") and not it.get("fallback") and key not in keys):
             keys.add(key)
             out.append({"room": it["room"], "id": msg["id"], "seq": msg["seq"], "ts": now})
-    return out[-MAX_DELIVERED:]
+            added = True
+    return out[-MAX_DELIVERED:], added
+
+
+def _receipt_labels(fire, rooms):
+    """{room: label} for the rooms that can appear on this fire's receipt line: None for each when the
+    session is in one room (ids only repeat across rooms), else the room's display when it is a valid
+    name no other of these rooms' labels shares, and the room id otherwise. Room ids are unique valid
+    names, so a shared label (two displays alike, or a display equal to another room's id) falls back
+    to the ids: one label for two rooms would group their ids together. Only these rooms are loaded."""
+    if len(fire.rooms) <= 1:
+        return dict.fromkeys(rooms)
+    labels = {}
+    for room in rooms:
+        display = fire.room(room)[1]
+        labels[room] = display if paths.valid_name(display) else room
+    while True:
+        counts = {}
+        for label in labels.values():
+            counts[label] = counts.get(label, 0) + 1
+        shared = [room for room, label in labels.items() if counts[label] > 1 and label != room]
+        if not shared:
+            return labels
+        for room in shared:
+            labels[room] = room
 
 
 def _receipts(fire, now):
@@ -338,11 +369,14 @@ def _receipts(fire, now):
     drops a name. An addressee who is gone or listed under an invalid sid is dropped for good. A
     seen pair the line has no room for stays for next fire."""
     pending, found, emits = [], [], {}
+    labels = _receipt_labels(fire, dict.fromkeys(entry["room"] for entry in fire.pending
+                                                 if now - entry["ts"] <= RECEIPT_MAX_AGE))
     for entry in fire.pending:
         if now - entry["ts"] > RECEIPT_MAX_AGE:
             continue
         room, msg_id, seq = entry["room"], entry["id"], entry["seq"]
         members, _, inbound, _ = fire.room(room)
+        label = labels.get(room)
         sid_of = {info["name"]: sid for sid, info in members.items()}
         kept = dict(entry, to=[])
         for name in dict.fromkeys(entry["to"]):
@@ -350,7 +384,7 @@ def _receipts(fire, now):
                 kept["to"].append(name)  # checked next fire
                 continue
             target = sid_of.get(name)
-            if target is None or not rooms._valid_sid(target):
+            if target is None or not paths.valid_sid(target):
                 continue  # gone, or a forged members.json key paths.check_sid would reject
             if target not in emits:
                 emits[target] = sessions.load_emit(target)["delivered"][-MAX_DELIVERED:]
@@ -362,12 +396,12 @@ def _receipts(fire, now):
                                   inbound, {}):
                 continue
             kept["to"].append(name)  # until the line shows it
-            found.append((kept, name, msg_id))
+            found.append((kept, name, msg_id, label))
         pending.append(kept)
-    _, shown = render.receipt_parts([(name, msg_id) for _, name, msg_id in found])
+    _, shown = render.receipt_parts([(name, msg_id, label) for _, name, msg_id, label in found])
     left = len(shown)
-    for kept, name, msg_id in found:
-        valid = render.receipt_pair_ok(name, msg_id)
+    for kept, name, msg_id, label in found:
+        valid = render.receipt_pair_ok(name, msg_id, label)
         if valid and left == 0:
             continue  # cut for length: stays pending
         kept["to"].remove(name)  # shown, or never showable
@@ -489,7 +523,7 @@ def _read_room(fire, room):
         key = (room, msg["id"], msg["seq"])
         if msg["seq"] <= dedupe or key in fire.seen or key in fire.ahead_keys:
             continue  # delivered before a reset, or taken already (last fire's emit state, or ahead)
-        if msg["sid"] == fire.sid:
+        if trust.own(msg, fire.sid, fire.room(room)[0]):
             fire.track(room, msg)
         action, reason = fire.verdict(room, msg)
         if action == "deliver":
@@ -532,7 +566,7 @@ def _look_ahead(fire, room, rest, floor):
         taken += 1
 
 
-def _deliver_locked(sid, meta, inp, event, env):
+def _deliver_locked(sid, meta, inp, event, env, reminder=None):
     state = sessions.load_emit(sid)
     fire = _Fire(sid, meta, env, state["ahead"], state["receipts"])
     cfg = config.load()
@@ -549,7 +583,8 @@ def _deliver_locked(sid, meta, inp, event, env):
     # Receipts cost nothing when none is pending. A shown receipt is done: it is never recorded for
     # transcript confirmation, so each is shown at most once.
     pairs, fire.pending = _receipts(fire, time.time()) if fire.pending else ([], [])
-    tail = render.receipt_line(pairs)
+    # The reminder (a healing fire only) and the receipt line end the context, inside build's caps.
+    tail = "\n".join(part for part in (reminder, render.receipt_line(pairs)) if part) or None
     context, emitted, overflow = render.build(fire.items, fire.me, cfg["render_budget_chars"], cfg["clip_chars"],
                                               tail=tail)
     message = render.system_message(emitted, fire.held, fire.me)
@@ -557,12 +592,16 @@ def _deliver_locked(sid, meta, inp, event, env):
     # before its output reaches Claude, the next fire finds these lines missing from the transcript
     # and redelivers them; overflow renders next fire. An emitted ref keeps its exact line (bounded
     # by the render caps): ids repeat across rooms, so an id alone can't confirm a delivery.
+    delivered, added = _delivered(state["delivered"], emitted, time.time())
     emit = {"emitted": [dict(it["ref"], line=it["line"]) for it in emitted],
             "overflow": [it["ref"] for it in overflow] + fire.unread,
             "ahead": [ref for room in fire.rooms for ref in fire.ahead.get(room, ())],
             "receipts": fire.pending,
-            "delivered": _delivered(state["delivered"], emitted, time.time())}
-    if emit != state:
+            "delivered": state["delivered"]}
+    if emit != state or added:
+        # Evidence is pruned (aged out, future-dated, malformed) only in a save that happens anyway
+        # (#31): pruning alone never writes on an otherwise idle fire.
+        emit["delivered"] = delivered
         sessions.save_emit(sid, emit["emitted"], emit["overflow"], emit["ahead"], emit["receipts"],
                            emit["delivered"])
     for room, (new, was_reset, was_restarted) in new_cursors.items():
@@ -584,12 +623,18 @@ def handle_session_end(inp, event, env):
     if pid is None:
         return None
     if not sessions.load_meta(sid)["rooms"]:
-        # Unjoined: leave nothing for a later SessionStart(clear) to take over from.
-        record = sessions.read_by_pid(pid)
-        if record and "prev_sid" in record:
-            del record["prev_sid"]
-            paths.atomic_write_json(sessions.by_pid_path(pid), record)
-        return None
+        # Unjoined. If a /clear's carry to this session never finished, it is cleared again before any
+        # fire (#7): finish the carry now, so the membership moves on with this /clear instead of
+        # being stranded with the old session.
+        try:
+            _carry_over_from_clear(sid, pid)
+        except paths.LockBusy:
+            return None  # the record keeps prev_sid: the next SessionStart(clear) carries from it
+        if not sessions.load_meta(sid)["rooms"]:
+            record = sessions.read_by_pid(pid)
+            if record and record.get("prev_sid") == sid:
+                _drop_prev_sid(pid, record)  # never a carry source while it has no rooms
+            return None
     try:
         sessions.record_pid(pid, sid, prev_sid=sid)
     except paths.LockBusy:
@@ -632,41 +677,78 @@ def handle_session_start(inp, event, env):
     return None
 
 
-CARRY_RETRY_WITHIN = 2.0  # seconds; the hook's own timeout is 5
+# Of SessionStart's 5 s hook timeout, the most the /clear carry may use (#7). A retry after a busy lock
+# runs only if a whole one still fits: a room-lock wait (the time left, at least CARRY_MIN_RETRY) plus
+# a meta-lock wait (sessions.META_LOCK_TIMEOUT). rooms.carry_over bounds its room-lock waits in all,
+# not per room, so this holds however many rooms move. It is best effort: an attempt's record_pid
+# can wait on the meta lock once more, and each attempt runs `ps`. An overrun that gets the hook
+# killed is safe: a carry is idempotent, and until record_pid drops prev_sid the next delivery fire
+# finishes it.
+CARRY_BUDGET = 4.5
+CARRY_MIN_RETRY = 0.5
+_clock = time.monotonic  # module-level, so tests can drive the retry budget
 
 
-def _carry_with_retry(sid, pid) -> None:
-    """Carry over, and once more if a lock was busy and there is time left. A failure past that
-    leaves the by-pid record as it is: the next delivery fire finishes the carry."""
-    started = time.monotonic()
+def _carry_with_retry(sid, pid) -> bool:
+    """Carry over, and once more if a lock was busy and a whole retry still fits CARRY_BUDGET. A
+    failure past that leaves the by-pid record as it is: the next delivery fire finishes the carry."""
+    started = _clock()
     try:
-        _carry_over_from_clear(sid, pid)
+        return _carry_over_from_clear(sid, pid)
     except paths.LockBusy:
-        if time.monotonic() - started > CARRY_RETRY_WITHIN:
+        left = CARRY_BUDGET - (_clock() - started) - sessions.META_LOCK_TIMEOUT
+        if left < CARRY_MIN_RETRY:
             raise
-        _carry_over_from_clear(sid, pid)
+        return _carry_over_from_clear(sid, pid, lock_timeout=min(left, rooms.CARRY_LOCK_TIMEOUT))
 
 
-def _carry_over_from_clear(sid, pid) -> bool:
+def _drop_prev_sid(pid, record) -> None:
+    """Rewrite the by-pid record without prev_sid: guard.sh then stops sending this process's fires
+    to Python for a carry that can never run."""
+    paths.atomic_write_json(sessions.by_pid_path(pid), {k: v for k, v in record.items() if k != "prev_sid"})
+
+
+def _carry_over_from_clear(sid, pid, lock_timeout=rooms.CARRY_LOCK_TIMEOUT) -> bool:
     """Finish a /clear carry-over to `sid`, if the by-pid record SessionEnd(clear) left names an old
     session. It counts only for the same process (a reused pid has another start token) and only
-    until record_pid rewrites the record without prev_sid. True if a carry-over ran. For a session
-    with no rooms this costs one small file read."""
+    until record_pid rewrites the record without prev_sid. True if a carry-over ran.
+
+    - A prev_sid that isn't a session id, or a record whose start token is known and differs (another
+      process got this pid), is dropped, so no later fire pays for it again (#7). A token that can't be
+      read (`ps` failed) keeps the record: try again next fire.
+    - The carry runs under `sid`'s delivery lock, non-blocking (#7): no fire of this session can save
+      its emit state while the old one moves in. Lock order: session .lock, room locks, meta lock (as
+      in `passnote leave`). LockBusy propagates.
+
+    For a session with no rooms and no pending carry this costs one small file read."""
     if pid is None:
         return False
     record = sessions.read_by_pid(pid)
     prev = record.get("prev_sid") if record else None
     if not isinstance(prev, str):
         return False
-    started = sessions.pid_started_at(pid)
-    if not started or record.get("pid_started_at") != started or paths.check_sid(prev) == sid:
+    if not paths.valid_sid(prev):
+        _drop_prev_sid(pid, record)
         return False
-    rooms.carry_over(paths.check_sid(prev), sid)
-    sessions.record_pid(pid, sid)
+    started = sessions.pid_started_at(pid)
+    if started is None:
+        return False
+    if record.get("pid_started_at") != started:
+        _drop_prev_sid(pid, record)
+        return False
+    prev = paths.check_sid(prev)
+    if prev == sid:
+        return False
+    with sessions.session_lock(sid):
+        rooms.carry_over(prev, sid, lock_timeout=lock_timeout)
+        sessions.record_pid(pid, sid)
     return True
 
 
 REMINDER_NAME_CHARS = 40
+# The SessionStart / healing-fire reminder, as JSON: forged room displays or names (each up to 40
+# characters, any of which can cost 12 bytes escaped) must not push the hook output past 8 KB.
+REMINDER_MAX_JSON = 1000
 # Rooms the reminder names before "+N": it stays one short line however many rooms there are.
 REMINDER_ROOMS_SHOWN = 5
 
@@ -689,6 +771,9 @@ def _reminder(sid, meta) -> str:
     if waiting:
         shown = ", ".join(render.gist(ref, REMINDER_NAME_CHARS) for ref in waiting[:10])
         line += f". Waiting on your reply: {shown} (passnote read --id ID)"
+    if len(json.dumps(line, ensure_ascii=True)) - 2 > REMINDER_MAX_JSON:
+        line = (f"passnote: you are a member of {len(meta['rooms'])} room(s); passnote rooms lists them; "
+                "/passnote for the protocol")
     return line
 
 

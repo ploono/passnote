@@ -594,6 +594,14 @@ class AddressedClipTest(DeliverCase):
         post(self.a, "r", "r" * 1700, to=["bob"])
         self.assertIn("r" * 1700, self.context(self.deliver(self.b)))
 
+    def test_two_addressed_posts_with_the_larger_clip_overflow_then_arrive(self):
+        post(self.a, "r", "x" * 1500, kind="ask", to=["bob"])
+        post(self.a, "r", "y" * 1500, kind="ask", to=["bob"])
+        first = self.context(self.deliver(self.b))
+        self.assertIn("x" * 1500, first)
+        self.assertIn("1 not shown yet: a2", first)
+        self.assertIn("y" * 1500, self.context(self.deliver(self.b)))
+
 
 class FullTextDeliverTest(DeliverCase):
     def test_a_long_post_is_delivered_with_its_path(self):
@@ -716,7 +724,6 @@ class DeliverFixRound3Test(RoomIdsCase):
         self.assertIn(ask, delivered)  # the new message with the reused id is not skipped
 
 
-
 class DeliverFixRound4Test(RoomIdsCase):
     """Task 12 review fix round 4: a resume point is a position the hook itself could have saved."""
 
@@ -791,7 +798,6 @@ class DeliverFixRound4Test(RoomIdsCase):
         self.assertEqual(cursor.load(self.b, "r")["seq"], 100)
 
 
-
 class ReceiptTest(DeliverCase):
     def seen_line(self, sid):
         lines = [line for line in self.context(self.deliver(sid)).split("\n") if line.startswith("passnote: seen by")]
@@ -803,6 +809,87 @@ class ReceiptTest(DeliverCase):
         self.deliver(self.b)
         self.assertEqual(self.seen_line(self.a), "passnote: seen by bob: a1")
         self.assertIsNone(self.seen_line(self.a))   # at most once per message
+
+    def test_a_sender_in_two_rooms_gets_room_labelled_receipts(self):
+        join(self.a, "r2", "alice")
+        join(self.b, "r2", "bob")
+        post(self.a, "r", "q1", kind="ask", to=["bob"])
+        post(self.a, "r2", "q2", kind="ask", to=["bob"])
+        self.deliver(self.a)  # alice's cursors pass both: pending
+        self.deliver(self.b)  # bob's turn delivers both
+        self.assertIn("passnote: seen [r] by bob: a1; [r2] by bob: a1", self.context(self.deliver(self.a)))
+
+    def _two_room_receipt(self, displays, extra=()):
+        join(self.a, "r2", "alice")
+        join(self.b, "r2", "bob")
+        for room, display in displays.items():
+            meta = store.load_meta(room)
+            meta["display"] = display
+            store.save_meta(room, meta)
+        post(self.a, "r", "q1", kind="ask", to=["bob"])
+        post(self.a, "r2", "q2", kind="ask", to=["bob"])
+        for room in extra:
+            post(self.a, room, "q", kind="ask", to=["bob"])
+        self.deliver(self.a)
+        self.deliver(self.b)
+        return self.context(self.deliver(self.a))
+
+    def test_a_unique_room_display_names_the_label(self):
+        self.assertIn("passnote: seen [api] by bob: a1; [web] by bob: a1",
+                      self._two_room_receipt({"r": "api", "r2": "web"}))
+
+    def test_rooms_sharing_a_display_are_labelled_by_room_id(self):
+        # one shared label would group both rooms' ids together: "[api] by bob: a1, a1"
+        self.assertIn("passnote: seen [r] by bob: a1; [r2] by bob: a1",
+                      self._two_room_receipt({"r": "api", "r2": "api"}))
+
+    def test_a_display_equal_to_another_rooms_id_is_labelled_by_room_id(self):
+        self.assertIn("passnote: seen [r] by bob: a1; [r2] by bob: a1",
+                      self._two_room_receipt({"r2": "r"}))
+
+    def test_labels_stay_distinct_when_a_fallback_id_meets_another_display(self):
+        join(self.a, "r3", "alice")
+        join(self.b, "r3", "bob")
+        # r2 and r3 share "x", so both fall back to their ids; r2's id then meets r's display
+        displays = {"r": "r2", "r2": "x", "r3": "x"}
+        line = self._two_room_receipt(displays, extra=("r3",))
+        self.assertTrue(line.startswith("passnote: seen "))  # a single pass gives "[r2] by bob: a1, a1"
+        self.assertEqual(sorted(line[len("passnote: seen "):].split("; ")),
+                         sorted(["[r] by bob: a1", "[r2] by bob: a1", "[r3] by bob: a1"]))
+
+    def test_receipt_labels_load_only_the_rooms_of_live_pending_entries(self):
+        now = time.time()
+        calls = []
+
+        class Fire:
+            sid, rooms = self.a, ["r", "r2", "r3"]
+            pending = [{"room": "r", "id": "a1", "seq": 1, "ts": now, "to": ["bob"]},
+                       {"room": "r3", "id": "a1", "seq": 1, "ts": now - hook.RECEIPT_MAX_AGE - 1, "to": ["bob"]}]
+
+            def room(self, room):
+                calls.append(room)
+                return {}, room, "allow", "alice"
+
+        hook._receipts(Fire(), now)
+        self.assertEqual(set(calls), {"r"})
+        calls.clear()
+        fire = Fire()
+        fire.pending = fire.pending[1:]  # only an expired entry
+        hook._receipts(fire, now)
+        self.assertEqual(calls, [])
+
+    def test_a_forged_room_display_falls_back_to_the_room_id_in_the_label(self):
+        join(self.a, "r2", "alice")
+        join(self.b, "r2", "bob")
+        meta = store.load_meta("r2")
+        meta["display"] = "\U0001F600" * 64
+        store.save_meta("r2", meta)
+        post(self.a, "r2", "q2", kind="ask", to=["bob"])
+        self.deliver(self.a)
+        self.deliver(self.b)
+        line = self.context(self.deliver(self.a))
+        self.assertEqual(line, "passnote: seen [r2] by bob: a1")
+        self.assertTrue(line.isascii())
 
     def test_a_receipt_alone_is_the_whole_context(self):
         post(self.a, "r", "review?", kind="ask", to=["bob"])
@@ -1065,6 +1152,13 @@ class ReceiptTest(DeliverCase):
         self.assertLess(len(out.encode()), 8192)
         self.assertIn("passnote: seen by bob:", json.loads(out)["hookSpecificOutput"]["additionalContext"])
 
+    def test_a_pending_receipt_with_a_future_ts_is_dropped(self):
+        entry = {"room": "r", "id": "a1", "seq": 1, "ts": time.time() + 10 * 86400, "mode": "default", "to": ["bob"]}
+        sessions.save_emit(self.a, [], [], receipts=[entry])
+        self.deliver(self.a)
+        self.assertEqual(sessions.load_emit(self.a)["receipts"], [])
+
+
 class ThreadDeliverTest(DeliverCase):
     def setUp(self):
         super().setUp()
@@ -1201,8 +1295,9 @@ class DigestDeliverTest(DeliverCase):
         """Even an addressed ask, were it ever digested, is no evidence: its text never reached the model."""
         m = {"id": "a1", "seq": 1, "kind": "ask", "to": ["bob"]}
         emitted = [{"room": "r", "msg": m, "me": "bob", "digest": True}]
-        self.assertEqual(hook._delivered([], emitted, time.time()), [])
-        self.assertEqual(len(hook._delivered([], [dict(emitted[0], digest=False)], time.time())), 1)
+        self.assertEqual(hook._delivered([], emitted, time.time()), ([], False))
+        evidence, added = hook._delivered([], [dict(emitted[0], digest=False)], time.time())
+        self.assertEqual((len(evidence), added), (1, True))
 
     def test_digest_line_is_confirmed_from_the_transcript(self):
         path = os.path.join(self.tmp, "t.jsonl")
@@ -1258,6 +1353,86 @@ class DigestDeliverTest(DeliverCase):
         sessions.update_meta(self.a, lambda meta: meta.update(permission_mode="bypassPermissions"))
         post(self.a, "r", "s1", thread="auth", mode="bypassPermissions")
         self.assertNotIn("#auth", self.context(self.deliver(self.b)))
+
+    def test_many_64_character_thread_names_stay_under_8_kb(self):
+        join(self.a, "r2", "alice")
+        join(self.b, "r2", "bob")
+        rooms.set_prefs(self.b, "r2", digest=True)
+        for room in ("r", "r2"):
+            for i in range(12):
+                post(self.a, room, "\U0001F600" * 300, thread="t" * 60 + f"{i:04d}")
+        raw = hook.main("PostToolBatch", hook_input(self.b), self.env(self.b))
+        self.assertLessEqual(len(raw.encode()), 8192)
+        ctx = self.context(json.loads(raw))
+        self.assertLessEqual(len(json.dumps(ctx)) - 2, render.MAX_CONTEXT_JSON)
+        self.assertLessEqual(sum(1 for line in ctx.split("\n") if " new (" in line), render.DIGEST_MAX_LINES)
+
+    def test_wholeness_uses_my_alias_in_each_room(self):
+        bert = new_sid()
+        join(bert, "r2", "bert")  # takes alias "b" in r2
+        join(self.b, "r2", "bob")  # bob is "bo" there
+        join(self.a, "r2", "alice")
+        rooms.set_prefs(self.b, "r2", digest=True)
+        post(self.a, "r2", "to b", kind="ans", re="b1")
+        post(self.a, "r2", "to bo", kind="ans", re="bo1")
+        lines = self.context(self.deliver(self.b)).split("\n")[1:]
+        self.assertIn("a2 alice→all ans re=bo1: to bo", lines)
+        self.assertIn("unthreaded: 1 new (a1), last alice: to b", lines)
+
+    def test_a_reply_to_my_post_from_before_clear_stays_whole(self):
+        post(self.b, "r", "my plan")  # b1, before the /clear
+        new = new_sid()
+        rooms.carry_over(self.b, new)
+        rooms.set_prefs(new, "r", threads=[])  # a subscription that filters every thread
+        post(self.a, "r", "ok", kind="ans", re="b1", thread="db")
+        self.assertIn("a2 alice→all ans re=b1 #db: ok", self.context(self.deliver(new)))
+
+
+class OwnAcrossClearTest(DeliverCase):
+    def test_own_posts_from_before_clear_are_not_delivered_back(self):
+        post(self.a, "r", "mine")  # past alice's cursor: she had no fire after posting
+        new = new_sid()
+        rooms.carry_over(self.a, new)
+        self.assertIsNone(self.deliver(new))
+
+    def test_an_ask_posted_just_before_clear_still_gets_its_seen_receipt(self):
+        post(self.a, "r", "q", kind="ask", to=["bob"])
+        new = new_sid()
+        rooms.carry_over(self.a, new)
+        self.deliver(new)     # its cursor passes a1: a pending receipt is recorded
+        self.deliver(self.b)  # bob's turn delivers a1
+        self.assertIn("passnote: seen by bob: a1", self.context(self.deliver(new)))
+
+    def test_a_prev_sid_naming_a_current_member_never_hides_its_lines(self):
+        members = store.load_members("r")
+        members[self.a]["prev_sids"] = [self.b]
+        store.save_members("r", members)
+        post(self.b, "r", "from bob")
+        self.assertIn("from bob", self.context(self.deliver(self.a)))
+
+
+class EmitStateTest(DeliverCase):
+    def test_a_fallback_line_is_not_delivery_evidence(self):
+        it = {"room": "r", "msg": {"id": "a1", "seq": 1, "kind": "ask", "to": ["bob"]}, "me": "bob", "fallback": True}
+        self.assertEqual(hook._delivered([], [it], time.time()), ([], False))
+
+    def test_ageing_evidence_alone_never_writes_on_an_idle_fire(self):
+        old = {"room": "r", "id": "x1", "seq": 1, "ts": time.time() - 2 * 86400}
+        sessions.save_emit(self.b, [], [], delivered=[old])
+        with mock.patch.object(sessions, "save_emit") as save:
+            self.assertIsNone(self.deliver(self.b))
+        save.assert_not_called()
+        self.assertEqual(sessions.load_emit(self.b)["delivered"], [old])
+        post(self.a, "r", "hi")
+        self.deliver(self.b)  # a save that happens anyway prunes it
+        self.assertEqual(sessions.load_emit(self.b)["delivered"], [])
+
+    def test_evidence_with_a_future_ts_is_pruned_in_the_next_save(self):
+        future = {"room": "r", "id": "x1", "seq": 1, "ts": time.time() + 10 * 86400}
+        sessions.save_emit(self.b, [], [], delivered=[future])
+        post(self.a, "r", "q", kind="ask", to=["bob"])
+        self.deliver(self.b)
+        self.assertEqual([entry["id"] for entry in sessions.load_emit(self.b)["delivered"]], ["a1"])
 
 
 if __name__ == "__main__":

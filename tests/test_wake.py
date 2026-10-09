@@ -3,7 +3,7 @@ import time
 import unittest
 
 from support import ROOT, HomeCase, new_sid
-from passnote import paths, sessions, store, wake
+from passnote import paths, render, sessions, store, wake
 
 FIXTURE = os.path.join(ROOT, "tests", "fixtures", "transcript_delivered.jsonl")
 
@@ -106,6 +106,12 @@ class DecideTest(HomeCase):
         line = wake.doorbell_line("bob", m)
         self.assertEqual(line, 'WAKE bob: SendMessage(to="bob", message="a7 from alice: passnote note waiting")')
         self.assertNotIn("MARIGOLD", line)
+
+    def test_doorbell_clips_a_long_forged_id(self):
+        line = wake.doorbell_line("bob", {"id": "a" * 500 + '"', "from": "alice", "text": "hi"})
+        self.assertIn('message="' + "a" * render.FIELD_CLIP + "… from alice: ", line)
+        self.assertEqual(line.count('"'), 4)
+        self.assertLess(len(line), 200)
 
     def test_doorbell_quotes_a_forged_sender_safely(self):
         for sender in ('al"ice', "alice\\", "al\nice", "x" * 500):

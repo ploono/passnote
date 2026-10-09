@@ -353,35 +353,37 @@ def cmd_claim(args, stdin, stdout, env):
     return _post(sid, room, args.what, "claim", None, None, False, False, False, stdout)
 
 
+# Thread names `who` and `subscribe` print per member: a forged members.json list can be any length.
+THREADS_SHOWN = 8
+
+
+def _thread_names(threads) -> str:
+    names = sorted(threads)
+    shown = ", ".join(names[:THREADS_SHOWN])
+    return shown + (f", +{len(names) - THREADS_SHOWN}" if len(names) > THREADS_SHOWN else "")
+
+
 def _threads_line(room, threads) -> str:
     if threads is None:
         shown = "all"
     else:
-        shown = ", ".join(sorted(threads)) or "none (you still get unthreaded lines, props, lines addressed to you and replies to your posts)"
+        shown = _thread_names(threads) or "none (you still get unthreaded lines, props, lines addressed to you and replies to your posts)"
     return f"threads in {room}: {shown}\n"
-
-
-def _my_threads(args, env):
-    """(sid, room, my current thread set or None) after validating the thread names (exit 2), then
-    membership (exit 3)."""
-    for name in args.threads:
-        paths.check_name(name)
-    sid, meta = _session(env)
-    room = _room(args, meta)
-    threads, _ = store.member_prefs(_members_or_exit(sid, room)[sid])
-    return sid, room, threads
 
 
 def cmd_subscribe(args, stdin, stdout, env):
     if args.all and args.threads:
         raise paths.PassnoteError("pass thread names or --all, not both", 2)
-    sid, room, threads = _my_threads(args, env)
+    for name in args.threads:
+        paths.check_name(name)
+    sid, meta = _session(env)
+    room = _room(args, meta)
     if args.all:
-        rooms.set_prefs(sid, room, threads=None)
-        threads = None
+        threads = rooms.change_threads(sid, room, every=True)
     elif args.threads:
-        threads = sorted((threads or frozenset()) | set(args.threads))
-        rooms.set_prefs(sid, room, threads=threads)
+        threads = rooms.change_threads(sid, room, add=args.threads)
+    else:
+        threads, _ = store.member_prefs(_members_or_exit(sid, room)[sid])
     stdout.write(_threads_line(room, threads))
     return 0
 
@@ -401,11 +403,11 @@ def cmd_digest(args, stdin, stdout, env):
 
 
 def cmd_unsubscribe(args, stdin, stdout, env):
-    sid, room, threads = _my_threads(args, env)
-    if threads is None:
-        raise paths.PassnoteError("you get every thread; subscribe to the ones you want instead", 2)
-    threads = sorted(threads - set(args.threads))
-    rooms.set_prefs(sid, room, threads=threads)
+    for name in args.threads:
+        paths.check_name(name)
+    sid, meta = _session(env)
+    room = _room(args, meta)
+    threads = rooms.change_threads(sid, room, remove=args.threads)
     stdout.write(_threads_line(room, threads))
     return 0
 
@@ -424,11 +426,6 @@ def _post(sid, room, text, kind, to_arg, re_id, wake_flag, urgent, allow_secret,
         if hit:
             raise paths.PassnoteError(f"the text looks like it contains a secret ({hit}); never post credentials. "
                                       "If this is a false alarm, pass --allow-secret-looking", 2)
-    # Over text_max_chars (#27): the log keeps the first text_max_chars, the whole text goes to
-    # the message's full-text file, so no log line can outgrow store.read_from's bound.
-    full_text = None
-    if len(text) > cfg["text_max_chars"]:
-        full_text, text = text, text[:cfg["text_max_chars"]]
     sid_by_name = {info["name"]: member_sid for member_sid, info in members.items()}
     if to_arg:
         to = list(dict.fromkeys(name.strip() for name in to_arg.split(",") if name.strip()))
@@ -453,6 +450,13 @@ def _post(sid, room, text, kind, to_arg, re_id, wake_flag, urgent, allow_secret,
         rec["thread"] = thread
     if wake_flag or urgent:
         rec["wake"] = True
+    # The log keeps the longest prefix that fits text_max_chars and LOG_LINE_MAX bytes (#27, #31); the
+    # whole text goes to the message's full-text file, so no setting can make the line one the hook skips.
+    overhead = store.record_overhead(rec, me["alias"])
+    if overhead >= store.LOG_LINE_MAX:
+        raise paths.PassnoteError("the post's other fields (--re, --to) are too long for one log line", 2)
+    rec["text"] = store.fit_text(text, cfg["text_max_chars"], store.LOG_LINE_MAX - overhead)
+    full_text = text if rec["text"] != text else None
     msg = store.append_message(room, rec, me["alias"], full_text=full_text)
     saved = f" (full text: {store.full_text_path(room, msg['id'])})" if full_text is not None else ""
     stdout.write(f"ok {msg['id']}{saved}\n")
@@ -489,10 +493,13 @@ def cmd_read(args, stdin, stdout, env):
                                           claude_settings.inbound(env.get("CLAUDE_PROJECT_DIR")))
         visible = []
         for msg in msgs:
-            if msg["sid"] == sid:  # visibility() skips the reader's own lines; read shows them
+            if trust.own(msg, sid, members):
+                # visibility() skips the reader's own lines, including those from before a /clear (#6);
+                # read shows them, as `who` does. No hold check: it would hide my own posts after a mode
+                # switch, or one stamped "unknown" (its fallback, the old session's mode, is gone).
                 visible.append(msg)
                 continue
-            verdict, reason = trust.visibility(msg, sid, me, meta.get("permission_mode"), inbound, env)
+            verdict, reason = trust.visibility(msg, sid, me, meta.get("permission_mode"), inbound, env, members)
             if verdict == "hold" and reason == "receiver mode unknown":
                 unrecorded += 1
             elif verdict == "hold":
@@ -598,7 +605,7 @@ def cmd_who(args, stdin, stdout, env):
                 f"{_session_state(member, now)} · mode {render.gist(mode, 40) if mode else 'unknown'}")
         threads, digest = store.member_prefs(info)
         if threads is not None:
-            line += " · threads " + (", ".join(sorted(threads)) or "none")
+            line += " · threads " + (_thread_names(threads) or "none")
         if digest:
             line += " · digest"
         if member == sid:

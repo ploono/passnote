@@ -89,7 +89,7 @@ def gist(text, limit) -> str:
     return escape_text(s[:keep]) + "…"
 
 
-def _clip_field(value, limit=FIELD_CLIP) -> str:
+def clip_field(value, limit=FIELD_CLIP) -> str:
     """Clip a head field (never message text) to `limit` characters BEFORE escaping, so a forged
     field of unbounded length can never make a rendered line's head unbounded."""
     s = str(value)
@@ -100,7 +100,7 @@ def audience(to, me) -> str:
     if not isinstance(to, list):
         return "all"
     if me is None or me not in to:
-        names = [escape_text(_clip_field(name)) for name in to[:MAX_TO_NAMES_SHOWN]]
+        names = [escape_text(clip_field(name)) for name in to[:MAX_TO_NAMES_SHOWN]]
         joined = ",".join(names)
         if len(to) > MAX_TO_NAMES_SHOWN:
             joined += f",+{len(to) - MAX_TO_NAMES_SHOWN}"
@@ -118,7 +118,7 @@ def _resolved_name(msg, members) -> str:
     claimed = str(msg.get("from", "?"))
     shown = member.get("name") or claimed
     flag = "" if member.get("name") == claimed else " (unverified)"
-    return f"{escape_text(_clip_field(shown))}{flag}"
+    return f"{escape_text(clip_field(shown))}{flag}"
 
 
 def addressed_by_name(msg, me) -> bool:
@@ -158,22 +158,22 @@ def digest_line(group, multi) -> str:
     first, last = group[0], group[-1]
     thread = thread_of(first["msg"])
     label = f"#{thread}" if thread else "unthreaded"  # a valid name needs no escaping
-    first_id = escape_text(_clip_field(first["msg"].get("id", "?")))
+    first_id = escape_text(clip_field(first["msg"].get("id", "?")))
     span = first_id
     if len(group) > 1:
-        span = f"{first_id}..{escape_text(_clip_field(last['msg'].get('id', '?')))}"
+        span = f"{first_id}..{escape_text(clip_field(last['msg'].get('id', '?')))}"
     line = (f"{label}: {len(group)} new ({span}), last {_resolved_name(last['msg'], last['members'])}: "
             f"{gist(last['msg'].get('text', ''), DIGEST_GIST_CHARS)}")
     if multi:
-        line = f"[{escape_text(_clip_field(first.get('display') or first['room']))}] {line}"
+        line = f"[{escape_text(clip_field(first.get('display') or first['room']))}] {line}"
     return line
 
 
 def render_line(msg, me, members, clip, room=None) -> str:
-    msg_id = escape_text(_clip_field(msg.get("id", "?")))
-    head = f"{msg_id} {_resolved_name(msg, members)}→{audience(msg.get('to'), me)} {escape_text(_clip_field(msg.get('kind', 'say')))}"
+    msg_id = escape_text(clip_field(msg.get("id", "?")))
+    head = f"{msg_id} {_resolved_name(msg, members)}→{audience(msg.get('to'), me)} {escape_text(clip_field(msg.get('kind', 'say')))}"
     if msg.get("re"):
-        head += f" re={escape_text(_clip_field(msg['re']))}"
+        head += f" re={escape_text(clip_field(msg['re']))}"
     thread = thread_of(msg)
     if thread:
         head += f" #{thread}"  # a valid name needs no escaping
@@ -230,37 +230,63 @@ def _reserve_for_overflow(n_items) -> int:
     return _json_len("\n" + _overflow_stub(n_items))
 
 
-def receipt_pair_ok(name, msg_id) -> bool:
-    """Whether a (name, id) pair may appear in a receipt line: a valid member name and a message id
-    of the full-text id shape. Both are ASCII and need no escaping."""
-    return paths.valid_name(name) and isinstance(msg_id, str) and bool(store.FULL_TEXT_ID_RE.fullmatch(msg_id))
+def _fallback_line(it, multi) -> str:
+    """build's first line when even MIN_CLIP doesn't fit (#31): a fixed shape whose only data is the id
+    and the [room] prefix, each clipped to FIELD_CLIP before escaping, so it is at most ~2.4 KB as JSON
+    and always fits the first line's cap. An id of the full-text id shape (at most 90 ASCII characters)
+    stays whole, so `passnote read --id`, which matches exactly, finds it. It still counts as emitted,
+    so the cursor moves on and a forged line can't block a room; its text never reached the model, so
+    it is never delivery evidence."""
+    raw = it["msg"].get("id", "?")
+    if isinstance(raw, str) and store.FULL_TEXT_ID_RE.fullmatch(raw):
+        msg_id = raw
+    else:
+        msg_id = escape_text(clip_field(raw))
+    line = f"{msg_id} (too large to show in this turn; passnote read --id {msg_id})"
+    if multi:
+        line = f"[{escape_text(clip_field(it.get('display') or it['room']))}] {line}"
+    return line
 
 
-def _receipt_text(by_name) -> str:
-    return "passnote: seen " + "; ".join(f"by {name}: {', '.join(ids)}" for name, ids in by_name.items())
+def receipt_pair_ok(name, msg_id, room=None) -> bool:
+    """Whether a (name, id[, room label]) may appear in a receipt line: a valid member name, a message id
+    of the full-text id shape, and a label that is None or a valid name. All ASCII, needing no escaping."""
+    return (paths.valid_name(name) and isinstance(msg_id, str) and bool(store.FULL_TEXT_ID_RE.fullmatch(msg_id))
+            and (room is None or paths.valid_name(room)))
+
+
+def _receipt_text(by_room) -> str:
+    """by_room: {room label or None: {name: [ids]}}, in first-seen order."""
+    parts = []
+    for room, by_name in by_room.items():
+        names = "; ".join(f"by {name}: {', '.join(ids)}" for name, ids in by_name.items())
+        parts.append(f"[{room}] {names}" if room else names)
+    return "passnote: seen " + "; ".join(parts)
 
 
 def receipt_parts(pairs):
-    """(line, shown): the receipt line for (name, id) pairs, grouped by name in first-seen order,
-    and the pairs it shows. Invalid pairs are dropped. Pairs are added one at a time until the
-    next would take the line past RECEIPT_MAX_CHARS; a lone valid pair always fits, so a caller
-    that keeps the pairs not shown for later always makes progress. (None, []) when none is valid."""
-    by_name, shown = {}, []
-    for name, msg_id in pairs:
-        if not receipt_pair_ok(name, msg_id):
+    """(line, shown): the receipt line for (name, id) or (name, id, room label) pairs, grouped by label
+    then name in first-seen order, and the pairs it shows (as given). Invalid pairs are dropped. Pairs
+    are added one at a time until the next would take the line past RECEIPT_MAX_CHARS; a lone valid
+    pair always fits, so a caller that keeps the pairs not shown for later always makes progress.
+    (None, []) when none is valid."""
+    by_room, shown = {}, []
+    for pair in pairs:
+        name, msg_id, room = (tuple(pair) + (None,))[:3]
+        if not receipt_pair_ok(name, msg_id, room):
             continue
-        trial = {key: list(ids) for key, ids in by_name.items()}
-        trial.setdefault(name, []).append(msg_id)
+        trial = {label: {key: list(ids) for key, ids in names.items()} for label, names in by_room.items()}
+        trial.setdefault(room, {}).setdefault(name, []).append(msg_id)
         if len(_receipt_text(trial)) > RECEIPT_MAX_CHARS:
             break
-        by_name = trial
-        shown.append((name, msg_id))
-    return (_receipt_text(by_name) if shown else None), shown
+        by_room = trial
+        shown.append(pair)
+    return (_receipt_text(by_room) if shown else None), shown
 
 
 def receipt_line(pairs):
-    """'passnote: seen by bob: a1, a3; by carol: a1' for (name, id) pairs, ASCII only (invalid names
-    or ids are dropped), at most RECEIPT_MAX_CHARS long; None when nothing is left."""
+    """'passnote: seen by bob: a1, a3; by carol: a1' for (name, id) pairs ('passnote: seen [r1] by bob: a1'
+    for (name, id, room label)), ASCII only (invalid names, ids or labels are dropped), at most RECEIPT_MAX_CHARS long; None when nothing is left."""
     return receipt_parts(pairs)[0]
 
 
@@ -269,7 +295,8 @@ def build(items, me, budget, clip, tail=None):
     room) overrides `me`. Each emitted entry is a copy of its item plus "line", the exact line the
     context holds for it, so the hook can confirm that line, not a bare id, in the transcript.
     `tail` (a receipt line, passnote's own text) ends the context, counted in the budget and in
-    MAX_CONTEXT_JSON; with no items it is the whole context, with no header.
+    MAX_CONTEXT_JSON; with no items it is the whole context, with no header. The first line falls
+    back to a fixed shape (marked "fallback") when even MIN_CLIP doesn't fit.
 
     Items marked "digest" (#26) are grouped by (room, thread) and each group renders as one
     digest_line after the whole items: groups with a redelivered item first, then by earliest seq,
@@ -305,7 +332,7 @@ def build(items, me, budget, clip, tail=None):
     def rendered(it, clip_val):
         line = render_line(it["msg"], it.get("me", me), it["members"], clip_val, room=it["room"])
         if multi:
-            line = f"[{escape_text(_clip_field(it.get('display') or it['room']))}] {line}"
+            line = f"[{escape_text(clip_field(it.get('display') or it['room']))}] {line}"
         return line
 
     # used: characters so far (the budget); size: the context's serialized JSON size so far.
@@ -317,6 +344,7 @@ def build(items, me, budget, clip, tail=None):
             first_cap = pack_cap - (OVERFLOW_ID_SLACK if len(items) > 1 else 0)
             hi = it.get("clip", clip)
             line = rendered(it, hi)
+            extra = {}
             if hi > MIN_CLIP and size + _json_len("\n" + line) > first_cap:
                 lo = MIN_CLIP  # lo is the best known fit (or the floor); hi is known not to fit
                 while hi - lo > 1:
@@ -326,8 +354,10 @@ def build(items, me, budget, clip, tail=None):
                     else:
                         lo = mid
                 line = rendered(it, lo)
+            if size + _json_len("\n" + line) > first_cap:
+                line, extra = _fallback_line(it, multi), {"fallback": True}
             lines.append(line)
-            emitted.append(dict(it, line=line))
+            emitted.append(dict(it, line=line, **extra))
             used += 1 + len(line)
             size += _json_len("\n" + line)
             continue
@@ -363,7 +393,7 @@ def build(items, me, budget, clip, tail=None):
         def overflow_line(n_ids):
             if n_ids <= 0:
                 return _overflow_stub(len(overflow))
-            ids = ", ".join(escape_text(_clip_field(it["msg"].get("id", "?"))) for it in overflow[:n_ids])
+            ids = ", ".join(escape_text(clip_field(it["msg"].get("id", "?"))) for it in overflow[:n_ids])
             more = "" if len(overflow) <= n_ids else f" and {len(overflow) - n_ids} more"
             return f"… {len(overflow)} not shown yet: {ids}{more} (they come next; passnote read --id <id>)"
 
@@ -386,7 +416,7 @@ def build(items, me, budget, clip, tail=None):
 
 
 def _held_gist(h, gist_chars) -> str:
-    return (f"{escape_text(_clip_field(h['msg'].get('id', '?')))} "
+    return (f"{escape_text(clip_field(h['msg'].get('id', '?')))} "
             f"{_resolved_name(h['msg'], h.get('members', {}))}: "
             f"{gist(h['msg'].get('text', ''), gist_chars)}")
 
@@ -402,8 +432,8 @@ def _room_summary(display, its, me) -> str:
     if len(senders) > MAX_NAMES_PER_ROOM:
         names += f", +{len(senders) - MAX_NAMES_PER_ROOM}"
     top = min(its, key=lambda it: (priority(it["msg"], it.get("me", me)), it["msg"].get("seq", 0)))["msg"]
-    return (f"passnote[{escape_text(_clip_field(display))}]: {len(its)} from {names} "
-            f"({escape_text(_clip_field(top.get('kind', 'say')))} {escape_text(_clip_field(top.get('id', '?')))})")
+    return (f"passnote[{escape_text(clip_field(display))}]: {len(its)} from {names} "
+            f"({escape_text(clip_field(top.get('kind', 'say')))} {escape_text(clip_field(top.get('id', '?')))})")
 
 
 def _fallback_summary(emitted, held) -> str:

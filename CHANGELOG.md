@@ -9,6 +9,19 @@ A release bumps the version in `plugin/.claude-plugin/plugin.json` and
 
 ## [Unreleased]
 
+### Fixed
+- After `/clear`, a session is no longer delivered its own earlier posts, `passnote read` shows its own earlier asks (`read --id` finds them), and an ask posted just before a `/clear` still gets its seen receipt (#6).
+- A `/clear` interrupted between moving membership and the session record no longer loses the messages waiting to be delivered, and a message re-sent after `/clear` is re-sent at most once (#7).
+- A second `/clear` before the first one's carry-over finished no longer drops the session's rooms; a carry no longer races a delivery; a stale process record no longer runs `ps` on every turn; the turn that finishes a delayed carry says who you are (#7).
+- The hook's output stays under its cap even when a forged message is too large to show at any clip; it is listed by id instead (#31).
+- A turn with nothing new no longer rewrites the session's delivery state just to age out old entries (#31).
+- A large `text_max_chars` (`PASSNOTE_TEXT_MAX_CHARS`) with non-ASCII text no longer writes a log line too long for delivery: the log keeps a shorter prefix and the whole text goes to the full-text file (#31).
+- A long post in a room whose log holds a forged huge `seq` is refused with a clear message (#31).
+- Two `subscribe`/`unsubscribe` commands at once no longer lose one of the changes, and `who` lists at most 8 threads per member (#31).
+
+### Changed
+- Seen receipts name the room (`passnote: seen [<room>] by <name>: <id>`) when you are in more than one room, since ids repeat across rooms; rooms sharing a display name are told apart by room id (#31).
+
 ## [0.2.0] - 2026-10-09
 
 The first tagged release. Copies installed from `main` before it report 0.1.0.

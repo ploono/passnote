@@ -6,8 +6,8 @@ import sys
 import unittest
 from unittest import mock
 
-from support import BIN, CliCase, new_sid
-from passnote import cli, cursor, paths, rooms, sessions, store
+from support import BIN, CliCase, hook_input, join, new_sid, post
+from passnote import cli, cursor, hook, paths, rooms, sessions, store
 
 
 def set_mode(sid, mode):
@@ -143,7 +143,6 @@ class JoinTest(CliCase):
         self.assertIn(self.a, store.load_members("r"))
         self.assertEqual(self.run_cli(self.a, "leave")[0], 0)
         self.assertFalse(os.path.exists(cursor.path(self.a, "r")))
-
 
 
 class JoinNameStdinTest(CliCase):
@@ -413,6 +412,41 @@ class PostTest(CliCase):
         self.assertIn("one of: r, r2", err)
         self.assertEqual(self.run_cli(self.a, "post", "--room", "r2", stdin="hi")[0], 0)
 
+    def test_a_large_text_max_chars_still_writes_a_readable_log_line(self):
+        with mock.patch.dict(os.environ, {"PASSNOTE_TEXT_MAX_CHARS": "100000"}):
+            code, _, err = self.run_cli(self.a, "post", stdin="漢" * 50000)
+        self.assertEqual(code, 0, err)
+        with open(store.log_path("r"), "rb") as fh:
+            raw = fh.read().splitlines()[-1]
+        self.assertLessEqual(len(raw) + 1, store.LOG_LINE_MAX)
+        logged = json.loads(raw)
+        self.assertEqual(logged["full_chars"], 50000)
+        with open(store.full_text_path("r", logged["id"]), encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), "漢" * 50000)
+        out = hook.main("PostToolBatch", hook_input(self.b), self.env(self.b))
+        self.assertIn("full text in", out)
+
+    def test_the_default_config_logs_the_same_prefix_as_before(self):
+        self.assertEqual(self.run_cli(self.a, "post", stdin="x" * 5000)[0], 0)
+        self.assertEqual(store.iter_messages("r")[-1][1]["text"], "x" * 4000)
+
+    def test_an_oversized_re_is_refused_and_writes_nothing(self):
+        code, _, err = self.run_cli(self.a, "post", "--re", "a" * 70000, stdin="hi")
+        self.assertEqual(code, 2)
+        self.assertIn("too long for one log line", err)
+        self.assertEqual(store.iter_messages("r"), [])
+
+    def test_a_forged_huge_seq_gives_a_clear_error_for_a_long_post(self):
+        forged = {"v": 1, "seq": 10 ** 18, "id": "z1", "from": "x", "sid": self.b, "to": "all", "kind": "say", "text": "x"}
+        with open(store.log_path("r"), "ab") as fh:
+            fh.write(json.dumps(forged).encode() + b"\n")
+        code, _, err = self.run_cli(self.a, "post", stdin="y" * 5000)
+        self.assertEqual(code, 2)
+        self.assertIn("too long for a full-text file", err)
+        self.assertNotIn("invalid message id", err)
+        self.assertFalse(os.path.exists(store.full_text_dir("r")))
+        self.assertEqual(self.run_cli(self.a, "post", stdin="short")[0], 0)
+
     def test_room_is_per_subcommand_not_global(self):
         # A global option before the verb would let `passnote --room r post` slip past the
         # subagent write guard's regex (hook._WRITE_CMD).
@@ -650,6 +684,38 @@ class ThreadTest(CliCase):
         self.assertEqual(self.run_cli(self.c, "unsubscribe", "auth", "--room", "r")[0], 3)
         self.assertNotIn("threads", store.load_members("r")[self.b])
 
+    def _racing(self, threads):
+        """A room_lock that first stores `threads` for alice: another subscribe that finished just before ours."""
+        real = store.room_lock
+
+        def racing(room, *args, **kwargs):
+            members = store.load_members(room)
+            members[self.a]["threads"] = threads
+            store.save_members(room, members)
+            return real(room, *args, **kwargs)
+
+        return racing
+
+    def test_subscribe_keeps_a_change_made_just_before_it_took_the_lock(self):
+        with mock.patch.object(store, "room_lock", self._racing(["first"])):
+            self.assertEqual(self.run_cli(self.a, "subscribe", "second")[0], 0)
+        self.assertEqual(store.load_members("r")[self.a]["threads"], ["first", "second"])
+
+    def test_unsubscribe_keeps_a_change_made_just_before_it_took_the_lock(self):
+        self.run_cli(self.a, "subscribe", "x", "y")
+        with mock.patch.object(store, "room_lock", self._racing(["x", "y", "z"])):
+            self.assertEqual(self.run_cli(self.a, "unsubscribe", "y")[0], 0)
+        self.assertEqual(store.load_members("r")[self.a]["threads"], ["x", "z"])
+
+    def test_who_and_subscribe_list_at_most_8_threads(self):
+        members = store.load_members("r")
+        members[self.a]["threads"] = [f"t{i:02d}" for i in range(100)]
+        store.save_members("r", members)
+        _, out, _ = self.run_cli(self.a, "who")
+        self.assertIn("· threads t00, t01, t02, t03, t04, t05, t06, t07, +92", out)
+        _, out, _ = self.run_cli(self.a, "subscribe")
+        self.assertEqual(out, "threads in r: t00, t01, t02, t03, t04, t05, t06, t07, +92\n")
+
     def test_read_thread_filter(self):
         self.run_cli(self.a, "post", "--thread", "auth", stdin="one")
         self.run_cli(self.a, "post", "--thread", "db", stdin="two")
@@ -680,6 +746,37 @@ class DigestCliTest(CliCase):
         self.assertNotIn("digest", store.load_members("r")[self.b])
         self.assertEqual(self.run_cli(self.b, "digest", "maybe")[0], 2)
         self.assertEqual(self.run_cli(self.c, "digest", "on", "--room", "r")[0], 3)
+
+
+class ReadAcrossClearTest(CliCase):
+    def setUp(self):
+        super().setUp()
+        paths.ensure_home()
+        join(self.a, "r", "alice")
+        join(self.b, "r", "bob")
+        post(self.a, "r", "split step 2?", kind="ask", to=["bob"])
+        post(self.a, "r", "and step 3?", kind="ask", to=["bob"], mode="unknown")  # posted in the command that joined
+        self.new = new_sid()
+        rooms.carry_over(self.a, self.new)
+
+    def test_read_shows_my_own_asks_from_before_clear(self):
+        code, out, _ = self.run_cli(self.new, "read", "--last", "5")
+        self.assertEqual(code, 0)
+        self.assertIn("a1 alice→bob ask: split step 2?", out)
+
+    def test_read_id_finds_my_own_ask_from_before_clear(self):
+        code, out, _ = self.run_cli(self.new, "read", "--id", "a1")
+        self.assertEqual(code, 0)
+        self.assertEqual(out, "a1 alice→bob ask: split step 2?\n")
+
+    def test_read_id_finds_my_earlier_ask_after_a_mode_switch(self):
+        sessions.update_meta(self.new, lambda meta: meta.update(permission_mode="auto"))  # another class now
+        code, out, _ = self.run_cli(self.new, "read", "--id", "a1")
+        self.assertEqual((code, out), (0, "a1 alice→bob ask: split step 2?\n"))
+
+    def test_read_id_finds_my_earlier_ask_stamped_unknown(self):
+        code, out, _ = self.run_cli(self.new, "read", "--id", "a2")
+        self.assertEqual((code, out), (0, "a2 alice→bob ask: and step 3?\n"))
 
 
 if __name__ == "__main__":

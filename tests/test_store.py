@@ -51,6 +51,12 @@ class StoreTest(HomeCase):
         super().setUp()
         paths.ensure_home()
 
+    def test_fit_text_keeps_the_longest_prefix_under_both_limits(self):
+        self.assertEqual(store.fit_text("abc", 2, 100), "ab")
+        self.assertEqual(store.fit_text("漢" * 10, 100, 6 * 4), "漢" * 4)  # each is \uXXXX: 6 bytes
+        self.assertEqual(store.fit_text("漢" * 10, 100, 5), "")
+        self.assertEqual(store.fit_text("x" * 4000, 4000, store.LOG_LINE_MAX), "x" * 4000)
+
     def test_append_assigns_seq_and_id(self):
         first = store.append_message("r", {"text": "one"}, "a")
         second = store.append_message("r", {"text": "two"}, "bo")
@@ -467,6 +473,17 @@ class FullTextTest(HomeCase):
             with self.assertRaises(OSError):
                 store.append_message("r", self.rec, "a", full_text="x" * 5000)
         self.assertEqual(os.listdir(store.full_text_dir("r")), [])
+
+    def test_the_full_text_file_exists_before_the_log_line_is_written(self):
+        seen, real = [], store._write_record
+
+        def check(fd, data):
+            seen.append(os.path.exists(store.full_text_path("r", "a1")))
+            return real(fd, data)
+
+        with mock.patch.object(store, "_write_record", check):
+            store.append_message("r", self.rec, "a", full_text="x" * 5000)
+        self.assertEqual(seen, [True])
 
     def test_full_text_path_rejects_forged_ids(self):
         for forged in ("../x", "a1/../../etc", "A1", "", None, 7, "a" * 73 + "1", "a1.txt", "a", "a1\n"):

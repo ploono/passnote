@@ -163,7 +163,6 @@ class RenderLineTest(unittest.TestCase):
         self.assertIn("(+100 chars: passnote read --id a1)", bad_room)
         self.assertTrue(as_bool.endswith("say: z"), as_bool)
 
-
     def test_thread_follows_kind_and_re(self):
         self.assertEqual(render.render_line(msg(thread="auth"), "bob", MEMBERS, 600), "a1 alice→all say #auth: hi")
         self.assertEqual(render.render_line(msg(thread="auth", kind="ans", re="b2", to=["bob"]), "bob", MEMBERS, 600),
@@ -459,6 +458,61 @@ class BuildTest(unittest.TestCase):
                 if overflow:
                     self.assertIn("not shown yet", context)
 
+    def test_a_first_line_too_large_even_at_min_clip_falls_back_to_a_fixed_shape(self):
+        wide = "\U0001F600" * 64
+        m = msg(id=wide, to=[wide] * 4, kind=wide, re=wide, text="x" * 2000)
+        shown = render.escape_text(render.clip_field(wide))
+        tail = "passnote: seen by " + "b" * 282  # a receipt-sized tail: the old code broke the cap here
+        for first in ({}, {"clip": render.MIN_CLIP}):  # shrunk to MIN_CLIP, or already there
+            with self.subTest(first=first):
+                items = [dict(item(m, room="r1"), display=wide, **first), item(msg(id="b2", seq=2), room="r2")]
+                ctx, emitted, _ = render.build(items, "bob", 2000, 600, tail=tail)
+                self.assertLessEqual(len(json.dumps(ctx)) - 2, render.MAX_CONTEXT_JSON)
+                self.assertTrue(emitted[0].get("fallback"))
+                # multi-room: the room prefix stays, and the id is the first token after it
+                self.assertTrue(emitted[0]["line"].startswith(
+                    f"[{shown}] {shown} (too large to show in this turn; passnote read --id {shown})"))
+                self.assertEqual(len(emitted[0]["line"].splitlines()), 1)
+                self.assertFalse(any(it.get("fallback") for it in emitted[1:]))
+                self.assertTrue(ctx.endswith("\n" + tail))
+
+    def test_the_fallback_line_is_bounded_whatever_the_id(self):
+        wide = "\U0001F600" * 5000
+        line = render._fallback_line(dict(item(msg(id=wide)), display=wide), True)
+        self.assertLess(len(json.dumps(line)), 2500)
+
+    def test_the_fallback_line_keeps_a_long_valid_id_whole(self):
+        for long_id in ("a" * 72 + "9" * 8, "a" * 72 + "9" * 18):  # 80 and 90 characters
+            with self.subTest(n=len(long_id)):
+                m = msg(id=long_id)
+                line = render._fallback_line(dict(item(m, room="r1"), display="api"), True)
+                self.assertEqual(line, f"[api] {long_id} (too large to show in this turn; "
+                                       f"passnote read --id {long_id})")
+                self.assertEqual(line.rsplit("passnote read --id ", 1)[1], long_id + ")")  # the whole id
+                self.assertLess(len(json.dumps(line)), 2500)
+
+    def test_the_fallback_line_still_clips_a_forged_long_id(self):
+        forged = "a" * 100 + "1"  # past FULL_TEXT_ID_RE's 72 letters
+        line = render._fallback_line(item(msg(id=forged)), False)
+        clipped = render.clip_field(forged)
+        self.assertEqual(line, f"{clipped} (too large to show in this turn; passnote read --id {clipped})")
+        self.assertNotIn(forged, line)
+
+    def test_the_fallback_line_clips_an_id_with_a_valid_start_and_junk(self):
+        forged = "a1" + "x" * 200  # its head matches the id shape; the whole does not
+        line = render._fallback_line(item(msg(id=forged)), False)
+        self.assertTrue(line.startswith(render.clip_field(forged) + " "))
+        self.assertNotIn(forged, line)
+        self.assertLess(len(json.dumps(line)), 2500)
+
+    def test_the_overflow_line_still_names_an_id_after_the_first_line_shrinks(self):  # (pinning, #31 C2)
+        items = [dict(item(msg(id="a1", seq=1, to=["bob"], kind="ask", text="\U0001F600" * 1500)), clip=1500),
+                 item(msg(id="a2", seq=2, text="\U0001F600" * 100))]
+        ctx, emitted, overflow = render.build(items, "bob", 2000, 600)
+        self.assertEqual([it["msg"]["id"] for it in overflow], ["a2"])
+        self.assertIn("… (+", emitted[0]["line"])  # shrunk
+        self.assertIn("1 not shown yet: a2", ctx)
+        self.assertLessEqual(len(json.dumps(ctx)) - 2, render.MAX_CONTEXT_JSON)
 
 
 class ReceiptLineTest(unittest.TestCase):
@@ -466,6 +520,14 @@ class ReceiptLineTest(unittest.TestCase):
         self.assertEqual(render.receipt_line([("bob", "a1"), ("bob", "a3"), ("carol", "a1")]),
                          "passnote: seen by bob: a1, a3; by carol: a1")
         self.assertIsNone(render.receipt_line([]))
+
+    def test_receipts_name_their_room_when_given(self):
+        self.assertEqual(render.receipt_line([("bob", "a1", "r1"), ("bob", "a3", "r1"), ("dan", "a1", "r2")]),
+                         "passnote: seen [r1] by bob: a1, a3; [r2] by dan: a1")
+        self.assertIsNone(render.receipt_line([("bob", "a1", "bad room")]))
+        self.assertEqual(render.receipt_line([("bob", "a1", None)]), "passnote: seen by bob: a1")
+        self.assertLessEqual(len(render.receipt_line([("b" * 64, "a" * 72 + "9" * 18, "r" * 64)])),
+                             render.RECEIPT_MAX_CHARS)  # a lone valid triple always fits
 
     def test_invalid_names_and_ids_are_dropped_and_the_line_is_bounded(self):
         pairs = [("böb", "a1"), ("bob", "../x"), ("bob", "a2")] + [("n" * 64, f"a{i}") for i in range(50)]

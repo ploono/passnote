@@ -2,7 +2,7 @@
 
 Amended by .scratch/passnote-phase-a/issues/01 (takeover only when gone; gc keeps gone members 7 days) and 02 (WAIT / overflow / unanswered).
 
-**Status:** spec v2.2 (2026-10-09).
+**Status:** spec v2.3 (2026-10-09).
 - v2 incorporates the multi-agent review in `2026-09-27-passnote-spec-review.md`; finding ids (F1…F43) are cited inline.
 - v2.1 folds in the results of spikes A1–A8 (§13), run on Claude Code 2.1.283 / macOS.
 - v2.2 (2026-10-09) amends §4, §6, §7, §8 and §10 from field feedback (#19, #20, #27, #28, #25, #26, #5).
@@ -12,6 +12,14 @@ Amended by .scratch/passnote-phase-a/issues/01 (takeover only when gone; gc keep
   - #25 (§4, §6, §7 step 5, §10): threads. A message may carry `thread` (`post --thread <name>`; a reply inherits its ask's thread). A member with a subscription (`subscribe`/`unsubscribe`, stored as `threads` on its `members.json` entry) is delivered only its threads, plus unthreaded lines, props, replies to its own posts and lines addressed to it by name.
   - #26 (§7, §10): digest mode. A member with `digest: true` on its `members.json` entry (`passnote digest on|off`) gets one line per (room, thread) with new activity instead of every line; props, replies to its own posts, lines posted with `--wake`, and `ask`, `err`, `prop`, `nak` and `ans` addressed to it by name still arrive whole.
   - #5 (§10): `/passnote:join [name]`, a skill only the human can run, joins without a model tool call. It hands the typed name to `join --name-stdin` as `[<name>]` through a quoted heredoc.
+- v2.3 (2026-10-09) amends §5, §6, §7 and §10 from the fixes batch (#6, #7, #9, #31).
+  - #9 (§7 step 4): a deleted and refilled log is a documented known limit.
+  - #6 (§7 step 5, §10): a session's own lines include those from before a /clear (members.json prev_sids): never delivered back, shown by read, tracked for seen receipts.
+  - #7 (§5, §7): /clear carry-over hardening (serialized under the session lock, a time-budgeted retry, stale records dropped, a second /clear finishes the first, a reminder after a heal; items 2 and 4 deferred/wontfix)
+  - #31 (§7): a first line too large for any clip has a fixed shape; future-dated receipts and evidence are dropped; pruning never writes on an idle fire.
+  - #31 (§6): a log line is at most 64 KB encoded, whatever text_max_chars is.
+  - #31 (§10): subscribe/unsubscribe change the set under the room lock; who and subscribe show at most 8 thread names.
+  - #31 (§7): receipt lines carry [room] labels for a session in more than one room.
 
 Approved by the author on 2026-09-27.
 
@@ -173,11 +181,11 @@ On every start, the hook rewrites `by-pid/<CLAUDE_PID>` = `{sid, pid_started_at}
 |---|---|
 | startup | Record only. |
 | resume | Same sid: keep the cursors. |
-| clear | Carry membership and cursors from the old sid to the new sid. SessionStart(clear) doesn't carry the old sid, so a **SessionEnd hook with matcher `clear`** records it first under `by-pid/<CLAUDE_PID>`. The SessionStart hook uses that record only when `pid_started_at` matches, which guards against pid reuse (A2). |
+| clear | Carry membership and cursors from the old sid to the new sid. SessionStart(clear) doesn't carry the old sid, so a **SessionEnd hook with matcher `clear`** records it first under `by-pid/<CLAUDE_PID>`. The SessionStart hook uses that record only when `pid_started_at` matches, which guards against pid reuse (A2). The carry moves the emit state before the new meta (the meta write is its commit point); emissions the old transcript doesn't confirm come back marked redelivered, so they are rendered again at most once. The carry runs under the new session's delivery `.lock`. SessionStart retries once after a busy lock if a whole retry fits 4.5 s of its 5 s timeout. A by-pid record whose start token is known and differs, or whose `prev_sid` is not a session id, is dropped. A SessionEnd(clear) of a session whose own carry never finished finishes it first, so the membership moves on. The delivery fire that finishes a carry also injects the "you are <name>…" line. |
 | compact | Same sid: keep the cursors. |
 | fork | New sid with no link to the parent, even though it inherits `session_title`. Not a member until it joins under its own name. |
 
-After clear, resume and compact, the hook injects one line: `passnote: you are <name> in rooms <…>; /passnote for the protocol`. It also re-surfaces pending addressed messages as one line (F5).
+After clear, resume and compact, the hook injects one line: `passnote: you are <name> in rooms <…>; /passnote for the protocol`. It also re-surfaces pending addressed messages as one line (F5). The line is at most 1,000 bytes as JSON; past that it is `passnote: you are a member of N room(s); passnote rooms lists them; /passnote for the protocol`.
 
 **Subagents.**
 - The hook exits immediately when `agent_id` is present in its input. `agent_type` alone (as in `--agent` main sessions) counts as the main thread.
@@ -197,7 +205,7 @@ After clear, resume and compact, the hook injects one line: `passnote: you are <
 - `seq`: a room-wide monotonic counter, recovered from the last line under the lock.
 - `id`: the member's alias (`[a-z]+`, unique per room, never reused; `w` is reserved) followed by `seq` (F38).
 - `to`: `"all"` or a list of names.
-- `text`: capped at 4,000 characters in the log; a longer post (up to `full_text_max_chars`, 100,000) stores its first 4,000 plus `full_chars`, and its whole text in `files/<id>.txt`, written under the room lock before the log line. The path is derived from room and id, never stored (#27). The secret guard scans the whole text first. A larger text goes in a file the sender writes, and the message carries its path (F14, F43).
+- `text`: capped at 4,000 characters in the log; a longer post (up to `full_text_max_chars`, 100,000) stores its first 4,000 plus `full_chars`, and its whole text in `files/<id>.txt`, written under the room lock before the log line. The path is derived from room and id, never stored (#27). The secret guard scans the whole text first. A larger text goes in a file the sender writes, and the message carries its path (F14, F43). A log line is at most 64 KB (`LOG_LINE_MAX`), measured encoded: a text whose escaped prefix wouldn't fit keeps a shorter one and gets a full-text file, whatever `text_max_chars` is; a post whose other fields alone exceed it is refused (exit 2). When ids have grown too long for a full-text file name (a forged huge `seq`), a long post is refused with a message saying so.
 - `thread` (optional, #25): a name, validated at post time like a member name (`[A-Za-z0-9._-]{1,64}`, not `.`/`..`, not reserved, so `all` is refused). `post --re <id>` without `--thread` takes the thread of message `<id>` when the log holds it with a valid thread. `thread` is never a reason to reject a line: any value that is not a valid name (a string or not) counts as unthreaded (delivered to everyone, rendered without `#`), so a forged value never hides a line.
 
 **Kinds.** Unknown kinds are rejected at post time (F22).
@@ -245,8 +253,9 @@ Readers open the file in binary mode and split on `b"\n"` only.
 4. For each joined room, read from `cursor.off` to the last complete `\n`.
    - If the inode changed or `off > size`, reset to 0 and dedupe by `seq ≤ cursor.seq`; log it (F16).
    - Cap the bytes read per fire at 256 KB.
+   - Known limit (#9): a log deleted by hand and recreated is still deduped by the old `seq`. If it grows past a member's cursor seq before that member's next fire, the new messages at or below that seq are never delivered to it. passnote never deletes a log. A fix needs a log identity in the room meta and in every cursor (a format change), so it is deferred.
 5. Filter out:
-   - lines with my own `sid`;
+   - my own lines: my session id, or an earlier one from before a `/clear` (`prev_sids` in `members.json`; a `prev_sid` that names another current member counts as theirs. The cost of trusting `prev_sids`: a forged `prev_sid` naming a departed sender hides that sender's lines from this reader (its `read` shows them) and tracks that sender's asks/props for seen receipts; it never affects a current member's lines, and adds no new exposure);
    - lines whose `to` excludes me;
    - `status` lines;
    - held messages (§9);
@@ -256,7 +265,7 @@ Readers open the file in binary mode and split on `b"\n"` only.
    2. other addressed messages;
    3. broadcasts.
 
-   A single message longer than its clip is clipped: 1,500 characters (`clip_addressed_chars`) when addressed to the receiver by name, else 600 (`clip_chars`); the larger of the two applies to addressed messages. Non-Latin text may clip earlier, because it costs more of the 8 KB hook output. The clipped form is `… (+N chars: passnote read --id b112)`. A message with a full-text file (#27) ends `… (+N chars: full text in <absolute path>)` instead, where N is `full_chars` minus the characters shown; the path is derived from the room and an id matching `^[a-z]{1,72}[0-9]{1,18}$`, never read from the log, and the hook never stats the file. A forged id, or a `full_chars` that isn't an integer larger than the stored text (a string, bool, float, list or too small a number), is ignored: the line is still delivered, with the `read --id` note when it is clipped. `read --id` prints the stored 4,000 characters and the same note; the receiver opens the file with Read. Messages that don't fit are listed by id on one overflow line and stay pending. An addressed message is never skipped silently.
+   A single message longer than its clip is clipped: 1,500 characters (`clip_addressed_chars`) when addressed to the receiver by name, else 600 (`clip_chars`); the larger of the two applies to addressed messages. Non-ASCII text may clip earlier, because it costs more of the 8 KB hook output. The clipped form is `… (+N chars: passnote read --id b112)`. A message with a full-text file (#27) ends `… (+N chars: full text in <absolute path>)` instead, where N is `full_chars` minus the characters shown; the path is derived from the room and an id matching `^[a-z]{1,72}[0-9]{1,18}$`, never read from the log, and the hook never stats the file. A forged id, or a `full_chars` that isn't an integer larger than the stored text (a string, bool, float, list or too small a number), is ignored: the line is still delivered, with the `read --id` note when it is clipped. `read --id` prints the stored 4,000 characters and the same note; the receiver opens the file with Read. Messages that don't fit are listed by id on one overflow line and stay pending. An addressed message is never skipped silently. The first line of a fire is always emitted (see also digest Bounds below), its clip shrunk to no less than 40 characters to fit the cap. If even a 40-character clip doesn't fit, the first line is `<id> (too large to show in this turn; passnote read --id <id>)`, with the `[room]` prefix in a multi-room fire: emitted, so the cursor moves on, but never delivery evidence. An id of the full-text id shape is shown whole there, so the `read --id` command finds it; any other id is clipped to 64 characters.
 7. Emit exactly one JSON object on stdout:
    `{"hookSpecificOutput":{"hookEventName":"<event>","additionalContext":"<header>\n<lines>"},"systemMessage":"passnote[<room>]: 2 from session-b (ask b112)"}`.
    The systemMessage makes every delivery visible to the human (F26). A3 verified that it is shown to the user, never sent to the model, and costs 0 tokens.
@@ -284,20 +293,20 @@ Escaping is **a security control, not cosmetics** (A4). A raw newline let a forg
 
 **Seen receipts (#28).** The sender's own hook tells its model when an addressee's turn has delivered the sender's `ask` or `prop` addressed by name (other kinds and broadcasts get none). No message is sent and `post` writes nothing for it.
 - When the sender's cursor passes its own addressed `ask` or `prop`, the hook records a pending receipt in `emit.json` (room, id, seq, ts, mode and the first 4 names of `to`, the sender excluded). Only the hook writes that state, under the session `.lock`.
-- **Delivery evidence.** Every session's hook records, in its own `emit.json` (`delivered`, written in the same save as the rest), each `ask` and `prop` addressed to it by name that it emitted to its model: room, id, seq and the time. Held and overflowing messages are not emitted, so they are never listed. The list keeps the last 64 entries, none older than 24 hours, and is carried across `/clear`.
+- **Delivery evidence.** Every session's hook records, in its own `emit.json` (`delivered`, written in the same save as the rest), each `ask` and `prop` addressed to it by name that it emitted to its model: room, id, seq and the time. Held and overflowing messages are not emitted, so they are never listed. The list keeps the last 64 entries, none older than 24 hours or dated in the future; stale entries are pruned only in a save that happens anyway. It is carried across `/clear`.
 - "Seen" for (message, addressee) needs positive evidence: the addressee's `delivered` list (its last 64 entries) holds the message's room, id and seq, with a finite ts. Missing, evicted, malformed or forged evidence proves nothing, and the pair stays pending until it ages out. So a held message is never reported seen, whatever held it (a permission class, the room's inbound, or the addressee's own `crossSessionInbound`, which the sender can't see). The sender reads neither the addressee's cursor nor the room's events.
 - In addition, the sender's mode is checked against the addressee's recorded mode, fail-closed (the addressee's `PASSNOTE_ALLOW_BYPASS` is invisible here): a mismatch drops the name. A departed or invalid-sid addressee is dropped for good, never reported.
-- Bounds: at most 16 pending messages (the oldest are dropped), 4 addressees each, 24 hours (older entries are dropped unreported), and 6 (message, name) pairs shown per fire; the rest are shown next fire. With nothing pending, a fire does no extra I/O; with receipts pending, it reads one `emit.json` per addressee (and their recorded mode once seen).
-- Output: one line, `passnote: seen by bob: a12, a14; by carol: a12`, grouped by name. Only valid member names and ids of the full-text id shape appear, so the line is ASCII; it is at most 300 characters, and a pair it has no room for is shown next fire. It ends `additionalContext`, counted inside its 6,500-byte cap and the character budget; with no messages, it is the whole context, with no header.
+- Bounds: at most 16 pending messages (the oldest are dropped), 4 addressees each, 24 hours (older entries, or entries dated in the future, are dropped unreported), and 6 (message, name) pairs shown per fire; the rest are shown next fire. With nothing pending, a fire does no extra I/O; with receipts pending, it reads one `emit.json` per addressee (and their recorded mode once seen).
+- Output: one line, `passnote: seen by bob: a12, a14; by carol: a12`, grouped by name. Only valid member names and ids of the full-text id shape appear, so the line is ASCII; it is at most 300 characters, and a pair it has no room for is shown next fire. A session in more than one room gets `passnote: seen [r1] by bob: a12; [r2] by carol: b3`: the label is the room's display when it is a valid name that no other room on the line would also get, else the room id, so the line stays ASCII and two rooms on it never share a label. It ends `additionalContext`, counted inside its 6,500-byte cap and the character budget; with no messages, it is the whole context, with no header.
 - It is not added to the systemMessage, so the 8 KB arithmetic (6,500 + 1,000) is unchanged; the human sees "seen" in `passnote who`. A receipt is never recorded for transcript confirmation: a lost one is not redelivered, so each is shown at most once.
-- Known gap: asks posted before a `/clear` carry the old session id, so the new session doesn't track them. Pending receipts already recorded are carried over.
+- Asks posted before a `/clear` are tracked like the session's own (`prev_sids`) when the new session's cursor passes them; pending receipts already recorded are carried over.
 - Known gap: delivery evidence for seen receipts is recorded when the line is emitted, not when the transcript confirms it, so a receipt can arrive early if another hook blocks the prompt.
 
 **Digest delivery (#26).** A hub member that would otherwise read every report in full can turn on digest mode: `passnote digest on` sets `digest: true` on its `members.json` entry (read this fire anyway, so no extra I/O; kept across `/clear`). Only the JSON value `true` turns it on: a forged value means off, which delivers more.
 - **Whole lines.** These still render as their own line: every `prop` (silence counts as consent once the cursor passes it, so a digested prop would be consent never given); every reply to one of the member's own posts (`re` is its alias followed by digits, the same check as the thread filter); anything posted with `--wake`; and an `ask`, `err`, `prop`, `nak` or `ans` addressed to it by name.
 - **Digested.** Everything else that step 5 lets through, e.g. broadcast `say`, `done`, `claim`, `err`, `ask`, and `ans`/`nak` to others; addressed `say`, `done` and `claim`. The thread filter runs first, so a skipped thread is never counted, and a held message is never counted in a digest.
 - **Format.** One line per (room, thread) with new activity, after the whole lines: `#<thread>: <n> new (<first id>..<last id>), last <sender>: <gist>`, or `unthreaded: …` for lines without a thread; one message shows `(<id>)`. The gist is the newest message's text, at most 60 rendered characters. The `[room]` prefix applies as for other lines. Groups with a redelivered item come first, then by earliest seq.
-- **Bounds.** At most 8 digest lines per fire; the items of further groups overflow, named on the overflow line, and come next fire. Digest lines count inside the character budget and the 6,500-byte cap. The first line of a fire, whole or digest, is always emitted, so a fire always makes progress.
+- **Bounds.** At most 8 digest lines per fire; the items of further groups overflow, named on the overflow line, and come next fire. Digest lines count inside the character budget and the 6,500-byte cap. The first line of a fire, whole or digest, is always emitted (§7 step 6), so a fire always makes progress.
 - **Confirmation.** Every digested item's emitted ref records the digest line as its `line`, so one transcript line confirms the whole group. An unconfirmed group comes back once, marked redelivered, as a digest line again, never as whole messages. A digested message is never delivery evidence for a seen receipt (its text didn't reach the model); addressed asks and props always arrive whole anyway.
 - **Detail on demand.** `passnote read --thread <name> --last <n>` or `read --id <id>`.
 
@@ -396,11 +405,11 @@ All commands take `--room`. The room is resolved as follows: the explicit `--roo
 | `leave` / `rooms` | Leave the room; list joined rooms |
 | `post [--to a,b] [--kind k] [--re id] [--thread name] [--wake\|--urgent]` | Post a message. Text is read from stdin; the skill uses a quoted heredoc, so the shell doesn't expand it. A reply without `--thread` keeps its ask's thread |
 | `claim "<what>"` / `claim --release <id>` | Claim work or release a claim |
-| `read [--id x \| --since id \| --last N] [--thread name]` | Filtered read that never moves the cursor. `--since` is exclusive. `--thread` filters first, and shows lines a subscription skipped |
+| `read [--id x \| --since id \| --last N] [--thread name]` | Filtered read that never moves the cursor. `--since` is exclusive. `--thread` filters first, and shows lines a subscription skipped. Shows your own messages, including those from before a `/clear` |
 | `subscribe [thread ...] [--all]` | Receive only these threads (plus unthreaded lines, props, replies to your posts and addressed lines); `--all` removes the filter; no arguments prints the setting (#25) |
 | `unsubscribe thread ...` | Drop threads from the subscription; refused when there is none (#25) |
 | `digest on\|off` | Digest mode: one line per thread with new activity; props, replies to your posts, `--wake` lines and asks, errs, props, naks and answers addressed to you still arrive whole (#26) |
-| `who` | Members, warm or cold, name and permission mode, thread subscription, digest mode, last error, pending addressed messages, claims, whether props were seen |
+| `who` | Members, warm or cold, name and permission mode, thread subscription (at most 8 names, then +N), digest mode, last error, pending addressed messages, claims, whether props were seen |
 | `watch [room \| --all]` | Live colored view of messages, holds, wake decisions and pending items |
 | `doctor` | Checks (§11) |
 | `gc` | Prune dead cursors, stale members and orphaned session dirs. Also runs opportunistically on `join` |
