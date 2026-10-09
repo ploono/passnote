@@ -827,8 +827,9 @@ class ReceiptTest(DeliverCase):
         post(self.a, "r", "secret?", kind="ask", to=["bob"])
         self.deliver(self.a)
         self.deliver(self.b, mode="bypassPermissions")
+        self.assertEqual(sessions.load_emit(self.b)["delivered"], [])  # held: no delivery evidence
         self.assertIsNone(self.seen_line(self.a))
-        self.assertEqual(sessions.load_emit(self.a)["receipts"], [])
+        self.assertIsNone(self.seen_line(self.a))
 
     def test_a_hold_from_before_the_addressee_cleared_still_counts(self):
         sessions.update_meta(self.b, lambda meta: meta.update(permission_mode="bypassPermissions"))
@@ -838,8 +839,9 @@ class ReceiptTest(DeliverCase):
         new = new_sid()
         rooms.carry_over(self.b, new)
         sessions.update_meta(new, lambda meta: meta.update(permission_mode="default"))
+        self.deliver(new)
         self.assertIsNone(self.seen_line(self.a))
-        self.assertEqual(sessions.load_emit(self.a)["receipts"], [])
+        self.assertIsNone(self.seen_line(self.a))
 
     def test_an_overflowed_ask_is_not_seen_until_it_is_delivered(self):
         os.environ["PASSNOTE_RENDER_BUDGET_CHARS"] = "300"
@@ -941,11 +943,11 @@ class ReceiptTest(DeliverCase):
         self.deliver(self.a)
         self.deliver(self.b)
         paths.atomic_write_json(os.path.join(paths.session_dir(self.b), "emit.json"),
-                                {"emitted": 5, "overflow": 7, "ahead": True, "receipts": "x"})
+                                {"emitted": 5, "overflow": 7, "ahead": True, "receipts": "x", "delivered": "y"})
         post(self.b, "r", "still here")
         ctx = self.context(self.deliver(self.a))
         self.assertIn("still here", ctx)
-        self.assertIn("passnote: seen by bob: a1", ctx)
+        self.assertNotIn("seen by", ctx)  # the forged state wiped bob's evidence: no receipt, no error
         self.assertEqual(self.errors_log(), [])
 
     def test_a_forged_hold_event_does_not_stop_delivery(self):
@@ -959,6 +961,91 @@ class ReceiptTest(DeliverCase):
         ctx = self.context(self.deliver(self.a))
         self.assertIn("still here", ctx)
         self.assertIn("passnote: seen by bob: a1", ctx)
+        self.assertEqual(self.errors_log(), [])
+
+    def hold_by_project_settings(self):
+        """bob's own project settings hold every inbound message: the sender can't see that."""
+        project = os.path.join(self.home, "bob-project")
+        os.makedirs(os.path.join(project, ".claude"))
+        with open(os.path.join(project, ".claude", "settings.json"), "w") as fh:
+            json.dump({"crossSessionInbound": "hold"}, fh)
+        return self.env(self.b, CLAUDE_PROJECT_DIR=project)
+
+    def test_an_addressee_holding_by_project_settings_never_yields_a_receipt(self):
+        env = self.hold_by_project_settings()
+        post(self.a, "r", "q", kind="ask", to=["bob"])
+        self.deliver(self.a)
+        self.assertEqual(self.context(self.deliver(self.b, env=env)), "")
+        self.assertTrue(self.hold_events())
+        self.assertIsNone(self.seen_line(self.a))
+        self.assertIsNone(self.seen_line(self.a))
+
+    def test_a_hold_evicted_from_the_events_window_is_never_reported_seen(self):
+        env = self.hold_by_project_settings()
+        post(self.a, "r", "q", kind="ask", to=["bob"])
+        self.deliver(self.a)
+        self.deliver(self.b, env=env)
+        with open(store.events_path("r"), "ab") as fh:  # any member can append this much junk
+            fh.write(b'{"type": "junk", "pad": "' + b"x" * (store.MAX_READ + 1024) + b'"}\n')
+        self.assertFalse(self.hold_events())
+        self.assertIsNone(self.seen_line(self.a))
+        self.assertIsNone(self.seen_line(self.a))
+
+    def test_delivery_evidence_is_recorded_and_survives_clear(self):
+        post(self.a, "r", "q", kind="ask", to=["bob"])
+        post(self.a, "r", "fyi", kind="say", to=["bob"])
+        self.deliver(self.a)
+        self.deliver(self.b)
+        self.assertEqual([(ev["room"], ev["id"], ev["seq"]) for ev in sessions.load_emit(self.b)["delivered"]],
+                         [("r", "a1", 1)])
+        new = new_sid()
+        rooms.carry_over(self.b, new)
+        self.assertEqual([ev["id"] for ev in sessions.load_emit(new)["delivered"]], ["a1"])
+        self.assertEqual(self.seen_line(self.a), "passnote: seen by bob: a1")
+
+    def test_receipts_never_read_the_addressee_cursor(self):
+        post(self.a, "r", "q", kind="ask", to=["bob"])
+        self.deliver(self.a)
+        self.deliver(self.b)
+        with mock.patch.object(cursor, "load", wraps=cursor.load) as spy:
+            self.assertEqual(self.seen_line(self.a), "passnote: seen by bob: a1")
+        self.assertNotIn(self.b, {call.args[0] for call in spy.call_args_list})
+
+    def test_forged_delivery_evidence_never_yields_a_receipt_or_an_error(self):
+        post(self.a, "r", "q", kind="ask", to=["bob"])
+        self.deliver(self.a)
+        forged = [{"room": "r", "id": "z1", "seq": 9}] * 5000 + [  # a huge list; the near-misses last
+                  None, "x", 7, {"room": "r", "id": "a1", "seq": "1", "ts": time.time()},
+                  {"room": "r", "id": "a1", "seq": True, "ts": time.time()},
+                  {"room": ["r"], "id": "a1", "seq": 1, "ts": time.time()},
+                  {"room": "r", "id": "a1", "seq": 1, "ts": float("nan")},
+                  {"room": "r", "id": "a1", "seq": 1, "ts": float("inf")},
+                  {"room": "r", "id": "a1", "seq": 1, "ts": 10 ** 400},
+                  {"room": "r", "id": "a1", "seq": 1}]
+        paths.atomic_write_json(os.path.join(paths.session_dir(self.b), "emit.json"), {"delivered": forged})
+        self.assertIsNone(self.seen_line(self.a))
+        self.assertIsNone(self.seen_line(self.a))
+        post(self.a, "r", "hello", kind="say", to=["bob"])
+        self.assertIn("hello", self.context(self.deliver(self.b)))  # bob's own hook prunes the forgery
+        delivered = sessions.load_emit(self.b)["delivered"]
+        self.assertEqual([(ev["room"], ev["id"], ev["seq"]) for ev in delivered], [("r", "a1", 1)])  # real now
+        self.assertLess(abs(delivered[0]["ts"] - time.time()), 60)
+        self.assertEqual(self.seen_line(self.a), "passnote: seen by bob: a1")
+        self.assertEqual(self.errors_log(), [])
+
+    def test_a_nan_or_infinite_ts_never_keeps_a_receipt_pending(self):
+        state, now = sessions.load_emit(self.a), time.time()
+        forged = [{"room": "r", "id": "a1", "seq": 1, "ts": bad, "to": ["bob"]}
+                  for bad in (float("nan"), float("inf"), float("-inf"), 10 ** 400)]
+        sessions.save_emit(self.a, state["emitted"], state["overflow"], state["ahead"], forged)
+        self.deliver(self.a)
+        self.assertEqual(sessions.load_emit(self.a)["receipts"], [])
+        store.append_message("r", {"from": "alice", "sid": self.a, "to": ["bob"], "kind": "ask", "text": "q",
+                                   "mode": "default", "ts": float("nan")}, "a")
+        self.deliver(self.a)
+        pending = sessions.load_emit(self.a)["receipts"]
+        self.assertEqual(len(pending), 1)
+        self.assertLessEqual(abs(pending[0]["ts"] - now), 60)  # tracked at the time it was seen
         self.assertEqual(self.errors_log(), [])
 
     def test_no_receipt_work_when_nothing_is_pending(self):

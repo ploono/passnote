@@ -116,7 +116,7 @@ An ask (or err) that at least one of its addressees hasn't replied to yet. This 
 _Avoid_: pending, open, outstanding
 
 **Seen receipt**:
-A line on a sender's next turn saying an addressee's turn has delivered the sender's ask or proposal. Worked out from the addressee's cursor; the addressee sends nothing.
+A line on a sender's next turn saying an addressee's turn has delivered the sender's ask or proposal. Worked out from the record the addressee's hook keeps of what it delivered; the addressee sends nothing.
 _Avoid_: ack, read receipt
 
 **Permission class**:

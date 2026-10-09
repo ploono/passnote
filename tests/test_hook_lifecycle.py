@@ -42,6 +42,13 @@ class LifecycleTest(HomeCase):
         rooms.carry_over(self.a, new)
         self.assertEqual([entry["id"] for entry in sessions.load_emit(new)["receipts"]], ["a1"])
 
+    def test_delivery_evidence_survives_clear(self):
+        post(self.a, "r", "q", kind="ask", to=["bob"])
+        hook.main("PostToolBatch", hook_input(self.b), self.env(self.b))
+        new = new_sid()
+        rooms.carry_over(self.b, new)
+        self.assertEqual([entry["id"] for entry in sessions.load_emit(new)["delivered"]], ["a1"])
+
     def test_reminder_lists_at_most_five_rooms(self):
         for i in range(2, 9):
             join(self.b, f"r{i}", "bob")

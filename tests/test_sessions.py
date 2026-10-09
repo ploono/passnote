@@ -148,16 +148,20 @@ class SessionsTest(HomeCase):
             sessions.resolve_name("all", None, None)
 
     def test_emit_state(self):
-        self.assertEqual(sessions.load_emit(self.sid), {"emitted": [], "overflow": [], "ahead": [], "receipts": []})
+        self.assertEqual(sessions.load_emit(self.sid), {"emitted": [], "overflow": [], "ahead": [], "receipts": [],
+                                                        "delivered": []})
         ref = {"room": "r", "off": 0, "len": 10, "id": "a1"}
         sessions.save_emit(self.sid, [ref], [])
         self.assertEqual(sessions.load_emit(self.sid)["emitted"], [ref])
         sessions.save_emit(self.sid, [], [ref], [dict(ref, seq=1)])
         self.assertEqual(sessions.load_emit(self.sid),
-                         {"emitted": [], "overflow": [ref], "ahead": [dict(ref, seq=1)], "receipts": []})
+                         {"emitted": [], "overflow": [ref], "ahead": [dict(ref, seq=1)], "receipts": [], "delivered": []})
         receipt = {"room": "r", "id": "a1", "seq": 1, "ts": 1.0, "mode": "default", "to": ["bob"]}
         sessions.save_emit(self.sid, [], [], [], [receipt])
         self.assertEqual(sessions.load_emit(self.sid)["receipts"], [receipt])
+        evidence = {"room": "r", "id": "a1", "seq": 1, "ts": 1.0}
+        sessions.save_emit(self.sid, [], [], [], [], [evidence])
+        self.assertEqual(sessions.load_emit(self.sid)["delivered"], [evidence])
 
     def test_recorded_mode(self):
         self.assertIsNone(sessions.recorded_mode(self.sid))

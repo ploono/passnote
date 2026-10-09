@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import sys
@@ -24,6 +25,8 @@ MAX_PENDING_RECEIPTS = 16
 MAX_RECEIPT_ADDRESSEES = 4
 RECEIPT_MAX_AGE = 86400  # seconds
 RECEIPTS_PER_FIRE = 6
+# Delivery evidence a session keeps: the addressed asks and props it delivered to its model.
+MAX_DELIVERED = 64
 
 
 def main(event, stdin_text, env=None) -> str:
@@ -195,7 +198,7 @@ class _Fire:
         if names and not any(entry["room"] == room and entry["id"] == msg["id"] for entry in self.pending):
             now, ts = time.time(), msg.get("ts")
             # A log line's ts is only a hint (any member can write one): never later than now.
-            ts = min(ts, now) if isinstance(ts, (int, float)) and not isinstance(ts, bool) else now
+            ts = min(ts, now) if _finite(ts) else now
             self.pending.append({"room": room, "id": msg["id"], "seq": msg["seq"], "ts": ts,
                                  "mode": msg.get("mode"), "to": names})
             self.pending = self.pending[-MAX_PENDING_RECEIPTS:]
@@ -242,30 +245,67 @@ class _Fire:
         store.append_event(room, {"type": "hold", "reason": reason, "id": msg["id"], "to_sid": self.sid})
 
 
+def _finite(value) -> bool:
+    """A real, finite number: a NaN or infinite ts would never age out, and an int too large for a
+    float (JSON allows one) would raise in the arithmetic."""
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
 def _valid_receipt(entry, rooms_joined) -> bool:
     """A pending receipt as track() records it; anything else in the emit state is dropped."""
     if not isinstance(entry, dict) or entry.get("room") not in rooms_joined:
         return False
-    seq, ts, to = entry.get("seq"), entry.get("ts"), entry.get("to")
-    return (isinstance(entry.get("id"), str) and isinstance(seq, int) and not isinstance(seq, bool) and seq >= 1
-            and isinstance(ts, (int, float)) and not isinstance(ts, bool)
-            and isinstance(to, list) and all(isinstance(name, str) for name in to)
+    seq, to = entry.get("seq"), entry.get("to")
+    return (isinstance(seq, int) and not isinstance(seq, bool) and seq >= 1 and _finite(entry.get("ts"))
+            and isinstance(to, list) and all(render.receipt_pair_ok(name, entry.get("id")) for name in to)
             and (entry.get("mode") is None or isinstance(entry.get("mode"), str)))
+
+
+def _valid_evidence(entry) -> bool:
+    """A delivery-evidence entry as _delivered() records it. Anything else proves nothing."""
+    return (isinstance(entry, dict) and isinstance(entry.get("room"), str) and isinstance(entry.get("id"), str)
+            and isinstance(entry.get("seq"), int) and not isinstance(entry.get("seq"), bool)
+            and _finite(entry.get("ts")))
+
+
+def _delivered(previous, emitted, now):
+    """This session's delivery evidence after a fire: the addressed (by name) asks and props it
+    emitted to its model, as {room, id, seq, ts}. Only emitted lines count, never held or
+    overflowing ones, so a sender's receipt can't report a held message seen. Bounded: the last
+    MAX_DELIVERED, none older than RECEIPT_MAX_AGE; malformed entries are dropped."""
+    out = [entry for entry in previous[-MAX_DELIVERED:]
+           if _valid_evidence(entry) and now - entry["ts"] <= RECEIPT_MAX_AGE]
+    keys = {(entry["room"], entry["id"], entry["seq"]) for entry in out}
+    for it in emitted:
+        msg = it["msg"]
+        key = (it["room"], msg["id"], msg["seq"])
+        if msg.get("kind") in RECEIPT_KINDS and render.addressed_by_name(msg, it.get("me")) and key not in keys:
+            keys.add(key)
+            out.append({"room": it["room"], "id": msg["id"], "seq": msg["seq"], "ts": now})
+    return out[-MAX_DELIVERED:]
 
 
 def _receipts(fire, now):
     """(pairs, pending): the (name, id) pairs to report seen this fire, at most RECEIPTS_PER_FIRE
-    and exactly those render.receipt_line shows, and the entries still pending. Seen means the
-    addressee's cursor passed the message (fold's prop rule) and it isn't in their overflow, or it
-    was taken ahead and delivered. A held message is never seen: the receiver's mode against the
-    sender's (fail-closed: their bypass env is invisible here) and the room's hold events (under
-    any sid the addressee had) both count. An addressee who is held, gone, or listed under an
-    invalid sid is dropped for good. A seen pair the line has no room for stays for next fire."""
-    pending, found, emits, holds = [], [], {}, {}
+    and exactly those render.receipt_line shows, and the entries still pending.
+
+    Seen needs positive evidence: the addressee's own emit state lists the message (room, id and
+    seq) among those it delivered to its model. Held, overflowing, evicted, malformed or forged
+    evidence proves nothing, so the pair stays pending until it ages out: a held message is never
+    reported seen. The addressee's cursor and the room's events are not read. On top of that, the
+    receiver's recorded mode against the sender's (fail-closed: their bypass env is invisible here)
+    drops a name. An addressee who is gone or listed under an invalid sid is dropped for good. A
+    seen pair the line has no room for stays for next fire."""
+    pending, found, emits = [], [], {}
     for entry in fire.pending:
         if now - entry["ts"] > RECEIPT_MAX_AGE:
             continue
-        room, msg_id = entry["room"], entry["id"]
+        room, msg_id, seq = entry["room"], entry["id"], entry["seq"]
         members, _, inbound, _ = fire.room(room)
         sid_of = {info["name"]: sid for sid, info in members.items()}
         kept = dict(entry, to=[])
@@ -277,25 +317,13 @@ def _receipts(fire, now):
             if target is None or not rooms._valid_sid(target):
                 continue  # gone, or a forged members.json key paths.check_sid would reject
             if target not in emits:
-                emits[target] = sessions.load_emit(target)
-
-            def listed(key):
-                return any(isinstance(ref, dict) and ref.get("room") == room and ref.get("id") == msg_id
-                           for ref in emits[target][key])
-
-            seen = listed("ahead") or (fold.passed(entry["seq"], cursor.load(target, room)) and not listed("overflow"))
-            if not seen:
-                kept["to"].append(name)
+                emits[target] = sessions.load_emit(target)["delivered"][-MAX_DELIVERED:]
+            if not any(_valid_evidence(ev) and (ev["room"], ev["id"], ev["seq"]) == (room, msg_id, seq)
+                       for ev in emits[target]):
+                kept["to"].append(name)  # not delivered (yet): held, overflowing or not read
                 continue
             if trust.content_hold({"sid": fire.sid, "mode": entry.get("mode")}, sessions.recorded_mode(target),
                                   inbound, {}):
-                continue
-            if room not in holds:
-                # Any member can append an event: only str fields make a key (a list would raise).
-                holds[room] = {(ev["id"], ev["to_sid"]) for ev in store.read_events(room)
-                               if ev.get("type") == "hold" and isinstance(ev.get("id"), str)
-                               and isinstance(ev.get("to_sid"), str)}
-            if any((msg_id, sid) in holds[room] for sid in [target] + list(members[target].get("prev_sids") or ())):
                 continue
             kept["to"].append(name)  # until the line shows it
             found.append((kept, name, msg_id))
@@ -496,9 +524,11 @@ def _deliver_locked(sid, meta, inp, event, env):
     emit = {"emitted": [dict(it["ref"], line=it["line"]) for it in emitted],
             "overflow": [it["ref"] for it in overflow] + fire.unread,
             "ahead": [ref for room in fire.rooms for ref in fire.ahead.get(room, ())],
-            "receipts": fire.pending}
+            "receipts": fire.pending,
+            "delivered": _delivered(state["delivered"], emitted, time.time())}
     if emit != state:
-        sessions.save_emit(sid, emit["emitted"], emit["overflow"], emit["ahead"], emit["receipts"])
+        sessions.save_emit(sid, emit["emitted"], emit["overflow"], emit["ahead"], emit["receipts"],
+                           emit["delivered"])
     for room, (new, was_reset, was_restarted) in new_cursors.items():
         cursor.save(sid, room, new, reset=was_reset, restarted=was_restarted)
     out = {}
