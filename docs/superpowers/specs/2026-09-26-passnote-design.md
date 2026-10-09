@@ -17,6 +17,7 @@ Amended by .scratch/passnote-phase-a/issues/01 (takeover only when gone; gc keep
   - #6 (§7 step 5, §10): a session's own lines include those from before a /clear (members.json prev_sids): never delivered back, shown by read, tracked for seen receipts.
   - #7 (§5, §7): /clear carry-over hardening (serialized under the session lock, a time-budgeted retry, stale records dropped, a second /clear finishes the first, a reminder after a heal; items 2 and 4 deferred/wontfix)
   - #31 (§7): a first line too large for any clip has a fixed shape; future-dated receipts and evidence are dropped; pruning never writes on an idle fire.
+  - #31 (§6): a log line is at most 64 KB encoded, whatever text_max_chars is.
 
 Approved by the author on 2026-09-27.
 
@@ -202,7 +203,7 @@ After clear, resume and compact, the hook injects one line: `passnote: you are <
 - `seq`: a room-wide monotonic counter, recovered from the last line under the lock.
 - `id`: the member's alias (`[a-z]+`, unique per room, never reused; `w` is reserved) followed by `seq` (F38).
 - `to`: `"all"` or a list of names.
-- `text`: capped at 4,000 characters in the log; a longer post (up to `full_text_max_chars`, 100,000) stores its first 4,000 plus `full_chars`, and its whole text in `files/<id>.txt`, written under the room lock before the log line. The path is derived from room and id, never stored (#27). The secret guard scans the whole text first. A larger text goes in a file the sender writes, and the message carries its path (F14, F43).
+- `text`: capped at 4,000 characters in the log; a longer post (up to `full_text_max_chars`, 100,000) stores its first 4,000 plus `full_chars`, and its whole text in `files/<id>.txt`, written under the room lock before the log line. The path is derived from room and id, never stored (#27). The secret guard scans the whole text first. A larger text goes in a file the sender writes, and the message carries its path (F14, F43). A log line is at most 64 KB (`LOG_LINE_MAX`), measured encoded: a text whose escaped prefix wouldn't fit keeps a shorter one and gets a full-text file, whatever `text_max_chars` is; a post whose other fields alone exceed it is refused (exit 2). When ids have grown too long for a full-text file name (a forged huge `seq`), a long post is refused with a message saying so.
 - `thread` (optional, #25): a name, validated at post time like a member name (`[A-Za-z0-9._-]{1,64}`, not `.`/`..`, not reserved, so `all` is refused). `post --re <id>` without `--thread` takes the thread of message `<id>` when the log holds it with a valid thread. `thread` is never a reason to reject a line: any value that is not a valid name (a string or not) counts as unthreaded (delivered to everyone, rendered without `#`), so a forged value never hides a line.
 
 **Kinds.** Unknown kinds are rejected at post time (F22).

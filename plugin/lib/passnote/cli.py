@@ -424,11 +424,6 @@ def _post(sid, room, text, kind, to_arg, re_id, wake_flag, urgent, allow_secret,
         if hit:
             raise paths.PassnoteError(f"the text looks like it contains a secret ({hit}); never post credentials. "
                                       "If this is a false alarm, pass --allow-secret-looking", 2)
-    # Over text_max_chars (#27): the log keeps the first text_max_chars, the whole text goes to
-    # the message's full-text file, so no log line can outgrow store.read_from's bound.
-    full_text = None
-    if len(text) > cfg["text_max_chars"]:
-        full_text, text = text, text[:cfg["text_max_chars"]]
     sid_by_name = {info["name"]: member_sid for member_sid, info in members.items()}
     if to_arg:
         to = list(dict.fromkeys(name.strip() for name in to_arg.split(",") if name.strip()))
@@ -453,6 +448,13 @@ def _post(sid, room, text, kind, to_arg, re_id, wake_flag, urgent, allow_secret,
         rec["thread"] = thread
     if wake_flag or urgent:
         rec["wake"] = True
+    # The log keeps the longest prefix that fits text_max_chars and LOG_LINE_MAX bytes (#27, #31); the
+    # whole text goes to the message's full-text file, so no setting can make the line one the hook skips.
+    overhead = store.record_overhead(rec, me["alias"])
+    if overhead >= store.LOG_LINE_MAX:
+        raise paths.PassnoteError("the post's other fields (--re, --to) are too long for one log line", 2)
+    rec["text"] = store.fit_text(text, cfg["text_max_chars"], store.LOG_LINE_MAX - overhead)
+    full_text = text if rec["text"] != text else None
     msg = store.append_message(room, rec, me["alias"], full_text=full_text)
     saved = f" (full text: {store.full_text_path(room, msg['id'])})" if full_text is not None else ""
     stdout.write(f"ok {msg['id']}{saved}\n")

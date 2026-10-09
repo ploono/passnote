@@ -20,6 +20,10 @@ MAX_PREV_SIDS = 16
 # A message id as a full-text file name: an alias (rooms._alias: up to 64 letters plus a short tail)
 # and a seq. Anything else gets no path, so a forged id can never point outside the room's files/.
 FULL_TEXT_ID_RE = re.compile(r"[a-z]{1,72}[0-9]{1,18}")
+# The longest log line a post writes (#31), measured on the encoded record: far below MAX_READ, so no
+# setting (text_max_chars) and no text (4 bytes of UTF-8 can cost 12 escaped) makes a line read_from
+# skips. A default post stays well under it: 4,000 characters are at most ~48 KB escaped.
+LOG_LINE_MAX = 64 * 1024
 
 
 def log_path(room):
@@ -155,6 +159,33 @@ def last_seq(path) -> int:
     return 0
 
 
+def _json_len(s) -> int:
+    return len(json.dumps(s, ensure_ascii=True)) - 2
+
+
+def fit_text(text, max_chars, budget) -> str:
+    """The longest prefix of `text`, at most `max_chars` characters, whose JSON-escaped size is at most
+    `budget` bytes (a binary search; escaping is additive per character)."""
+    prefix = text[:max_chars]
+    if _json_len(prefix) <= budget:
+        return prefix
+    lo, hi = 0, len(prefix)  # prefix[:lo] fits, prefix[:hi] doesn't
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if _json_len(prefix[:mid]) <= budget:
+            lo = mid
+        else:
+            hi = mid
+    return prefix[:lo]
+
+
+def record_overhead(rec, alias) -> int:
+    """Bytes of rec's log line without its text, with the largest seq, id, ts and full_chars a post
+    gets, plus the newline and a possible repair newline (append_message)."""
+    probe = dict(rec, text="", v=1, seq=10 ** 18, id=f"{alias}{10 ** 18}", ts=time.time(), full_chars=10 ** 6)
+    return len(json.dumps(probe, ensure_ascii=True, sort_keys=True)) + 2
+
+
 def append_message(room: str, rec: dict, alias: str, full_text=None) -> dict:
     """Append rec under the room lock. With full_text (#27), the whole text is written to its
     full-text file first and rec gains full_chars; if the log append then fails, the file is
@@ -171,7 +202,10 @@ def append_message(room: str, rec: dict, alias: str, full_text=None) -> dict:
             rec["full_chars"] = len(full_text)
             written = full_text_path(room, rec["id"])
             if written is None:
-                raise paths.PassnoteError(f"invalid message id {rec['id']!r} for a full-text file", 2)
+                raise paths.PassnoteError(
+                    f"message ids in {room} have grown too long for a full-text file (the log's last seq has "
+                    f"{len(str(rec['seq'] - 1))} digits; a forged line?): post at most {len(rec['text'])} "
+                    "characters, or ask the human to check the room's log", 2)
             paths.atomic_write_text(written, full_text)
         try:
             data = json.dumps(rec, ensure_ascii=True, sort_keys=True).encode("ascii") + b"\n"

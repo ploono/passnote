@@ -6,8 +6,8 @@ import sys
 import unittest
 from unittest import mock
 
-from support import BIN, CliCase, join, new_sid, post
-from passnote import cli, cursor, paths, rooms, sessions, store
+from support import BIN, CliCase, hook_input, join, new_sid, post
+from passnote import cli, cursor, hook, paths, rooms, sessions, store
 
 
 def set_mode(sid, mode):
@@ -411,6 +411,41 @@ class PostTest(CliCase):
         self.assertEqual(code, 2)
         self.assertIn("one of: r, r2", err)
         self.assertEqual(self.run_cli(self.a, "post", "--room", "r2", stdin="hi")[0], 0)
+
+    def test_a_large_text_max_chars_still_writes_a_readable_log_line(self):
+        with mock.patch.dict(os.environ, {"PASSNOTE_TEXT_MAX_CHARS": "100000"}):
+            code, _, err = self.run_cli(self.a, "post", stdin="漢" * 50000)
+        self.assertEqual(code, 0, err)
+        with open(store.log_path("r"), "rb") as fh:
+            raw = fh.read().splitlines()[-1]
+        self.assertLessEqual(len(raw) + 1, store.LOG_LINE_MAX)
+        logged = json.loads(raw)
+        self.assertEqual(logged["full_chars"], 50000)
+        with open(store.full_text_path("r", logged["id"]), encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), "漢" * 50000)
+        out = hook.main("PostToolBatch", hook_input(self.b), self.env(self.b))
+        self.assertIn("full text in", out)
+
+    def test_the_default_config_logs_the_same_prefix_as_before(self):
+        self.assertEqual(self.run_cli(self.a, "post", stdin="x" * 5000)[0], 0)
+        self.assertEqual(store.iter_messages("r")[-1][1]["text"], "x" * 4000)
+
+    def test_an_oversized_re_is_refused_and_writes_nothing(self):
+        code, _, err = self.run_cli(self.a, "post", "--re", "a" * 70000, stdin="hi")
+        self.assertEqual(code, 2)
+        self.assertIn("too long for one log line", err)
+        self.assertEqual(store.iter_messages("r"), [])
+
+    def test_a_forged_huge_seq_gives_a_clear_error_for_a_long_post(self):
+        forged = {"v": 1, "seq": 10 ** 18, "id": "z1", "from": "x", "sid": self.b, "to": "all", "kind": "say", "text": "x"}
+        with open(store.log_path("r"), "ab") as fh:
+            fh.write(json.dumps(forged).encode() + b"\n")
+        code, _, err = self.run_cli(self.a, "post", stdin="y" * 5000)
+        self.assertEqual(code, 2)
+        self.assertIn("too long for a full-text file", err)
+        self.assertNotIn("invalid message id", err)
+        self.assertFalse(os.path.exists(store.full_text_dir("r")))
+        self.assertEqual(self.run_cli(self.a, "post", stdin="short")[0], 0)
 
     def test_room_is_per_subcommand_not_global(self):
         # A global option before the verb would let `passnote --room r post` slip past the
